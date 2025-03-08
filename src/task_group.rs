@@ -2,7 +2,7 @@ use futures::future::select_all;
 use tokio::task::JoinHandle;
 
 #[derive(Debug)]
-pub struct TaskGroup<T> {
+pub(crate) struct TaskGroup<T> {
     handles: Vec<JoinHandle<T>>,
 }
 
