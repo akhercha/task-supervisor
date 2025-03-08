@@ -1,5 +1,5 @@
 [package]
-name = "tasks-supervisor"
+name = "task-supervisor"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
@@ -7,7 +7,7 @@ categories = ["asynchronous"]
 description = "Tokio tasks Supervisor"
 authors = ["akhercha <adel@pragma.build>"]
 keywords = ["tasks", "tokio", "supervisor"]
-repository = "https://github.com/akhercha/tasks-supervisor"
+repository = "https://github.com/akhercha/task-supervisor"
 license = "MIT"
 
 [dependencies]

@@ -1,6 +1,6 @@
-//! # Tasks Supervisor for Tokio
+//! # Task Supervisor for Tokio
 //!
-//! The `tasks-supervisor` crate provides a smol framework for managing and monitoring asynchronous tasks
+//! The `task-supervisor` crate provides a smol framework for managing and monitoring asynchronous tasks
 //! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health
 //! via heartbeats and automatically restarting them if they fail or become unresponsive.
 //!

@@ -1,9 +1,9 @@
-# 🤖 tasks-supervisor
+# 🤖 task-supervisor
 
 [![Crates.io](https://img.shields.io/crates/v/supervisor.svg)](https://crates.io/crates/supervisor)
 [![Docs.rs](https://docs.rs/supervisor/badge.svg)](https://docs.rs/supervisor)
 
-The `tasks-supervisor` crate is a Rust library for managing and monitoring asynchronous tasks within the Tokio runtime. It ensures tasks remain operational by tracking their health via heartbeats and restarting them if they fail or become unresponsive.
+The `task-supervisor` crate is a Rust library for managing and monitoring asynchronous tasks within the Tokio runtime. It ensures tasks remain operational by tracking their health via heartbeats and restarting them if they fail or become unresponsive.
 
 It is really smol and simple for now.
 
