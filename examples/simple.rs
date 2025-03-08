@@ -1,5 +1,6 @@
+use anyhow::bail;
+use async_trait::async_trait;
 use std::time::Duration;
-
 use task_supervisor::{SupervisedTask, SupervisorBuilder};
 
 #[derive(Clone, Default)]
@@ -13,9 +14,8 @@ impl MyTask {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl SupervisedTask for MyTask {
-    // Using anyhow for simplicity but could be your Error type
     type Error = anyhow::Error;
 
     async fn run_forever(&mut self) -> anyhow::Result<()> {
@@ -25,23 +25,32 @@ impl SupervisedTask for MyTask {
             println!("{} Task is running!", self.emoji);
             i += 1;
             if i == 5 {
-                break;
+                println!("{} Task is failing after 5 iterations...", self.emoji);
+                bail!("Task failed after 5 iterations");
             }
         }
-        println!("End of the task...");
-        Ok(())
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let mut supervisor = SupervisorBuilder::default()
+    // Build the supervisor with initial tasks
+    let supervisor = SupervisorBuilder::default()
         .with_task(MyTask::new('🥴'))
         .with_task(MyTask::new('🧑'))
         .with_task(MyTask::new('😸'))
         .with_task(MyTask::new('👽'))
         .build();
 
-    supervisor.run_and_supervise().await;
-    println!("All tasks died! The end 🫡");
+    // Run the supervisor and get the handle
+    let handle = supervisor.run();
+
+    // Spawn a task to add a new task after 5 seconds
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    println!("Adding a new task after 5 seconds...");
+    handle.add_task(MyTask::new('🆕'));
+
+    // Wait for all tasks to die
+    handle.wait().await;
+    println!("All tasks died! 🫡");
 }

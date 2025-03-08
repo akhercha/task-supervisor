@@ -1,3 +1,6 @@
+pub(crate) mod builder;
+pub(crate) mod handle;
+
 use std::{collections::HashMap, time::Duration};
 
 use tokio::{
@@ -7,7 +10,8 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    messaging::{Heartbeat, SupervisorMessage},
+    messaging::{Heartbeat, SupervisedTaskMessage, SupervisorMessage},
+    supervisor::handle::SupervisorHandle,
     task::{SupervisedTask, TaskHandle, TaskStatus},
     task_group::TaskGroup,
 };
@@ -15,17 +19,32 @@ use crate::{
 pub type TaskId = uuid::Uuid;
 
 pub struct Supervisor<T: SupervisedTask> {
-    tasks: HashMap<TaskId, TaskHandle<T>>,
-    timeout_treshold: Duration,
-    rx: mpsc::UnboundedReceiver<SupervisorMessage>,
-    tx: mpsc::UnboundedSender<SupervisorMessage>,
+    pub(crate) tasks: HashMap<TaskId, TaskHandle<T>>,
+    pub(crate) timeout_treshold: Duration,
+    pub(crate) external_tx: mpsc::UnboundedSender<SupervisorMessage<T>>,
+    pub(crate) external_rx: mpsc::UnboundedReceiver<SupervisorMessage<T>>,
+    pub(crate) tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
+    pub(crate) rx: mpsc::UnboundedReceiver<SupervisedTaskMessage>,
 }
 
 impl<T> Supervisor<T>
 where
     T: SupervisedTask + Clone + Send + 'static,
 {
-    pub async fn run_and_supervise(&mut self) {
+    /// Runs the supervisor, consuming it and returning a handle for control.
+    pub fn run(self) -> SupervisorHandle<T> {
+        let user_tx = self.external_tx.clone();
+        let handle = tokio::spawn(async move {
+            self.run_and_supervise().await;
+        });
+        SupervisorHandle {
+            tx: user_tx,
+            join_handle: handle,
+        }
+    }
+
+    /// Internal method to start and supervise all tasks.
+    async fn run_and_supervise(mut self) {
         if self.tasks.is_empty() {
             return;
         }
@@ -47,17 +66,31 @@ where
 
         loop {
             tokio::select! {
-                Some(msg) = self.rx.recv() => {
-                    match msg {
-                        SupervisorMessage::Heartbeat(heartbeat) => {
+                // Handle internal messages (heartbeats, restarts)
+                Some(internal_msg) = self.rx.recv() => {
+                    match internal_msg {
+                        SupervisedTaskMessage::Heartbeat(heartbeat) => {
                             self.register_heartbeat(heartbeat);
                         },
-                        SupervisorMessage::Restart(task_id) => {
+                        SupervisedTaskMessage::Restart(task_id) => {
                             self.restart_task(task_id).await;
                         }
                     }
                 },
 
+                // Handle user messages through Supervisor handle
+                Some(user_msg) = self.external_rx.recv() => {
+                    match user_msg {
+                        SupervisorMessage::AddTask(task) => {
+                            let task_id = Uuid::new_v4();
+                            let mut task_handle = TaskHandle::new(task);
+                            Self::start_task(task_id, &mut task_handle, self.tx.clone()).await;
+                            self.tasks.insert(task_id, task_handle);
+                        }
+                    }
+                },
+
+                // Periodic health check
                 _ = health_check_interval.tick() => {
                     self.check_all_health();
                     if self.all_tasks_died() {
@@ -71,34 +104,28 @@ where
     async fn start_task(
         task_id: TaskId,
         task_handle: &mut TaskHandle<T>,
-        tx: mpsc::UnboundedSender<SupervisorMessage>,
+        tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
     ) {
         let mut task = task_handle.task.clone();
-
         let handle = tokio::spawn(async move {
-            // Run the provided task
             let ran_task = tokio::spawn(async move { task.run_forever().await });
-
-            // Beat every seconds
             let heartbeat_task = tokio::spawn(async move {
                 let mut beat_interval = tokio::time::interval(Duration::from_millis(500));
                 loop {
                     beat_interval.tick().await;
-                    let beat = SupervisorMessage::Heartbeat(Heartbeat::new(task_id));
+                    let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(task_id));
                     if tx.send(beat).is_err() {
                         break;
                     }
                 }
                 Ok(())
             });
-
             TaskGroup::new()
                 .with_handle(ran_task)
                 .with_handle(heartbeat_task)
                 .abort_all_if_one_resolves()
                 .await
         });
-
         task_handle.handle = Some(handle);
         task_handle.mark(TaskStatus::Starting);
     }
@@ -107,13 +134,10 @@ where
         let Some(task_handle) = self.tasks.get_mut(&heartbeat.task_id) else {
             return;
         };
-
         if task_handle.status == TaskStatus::Dead {
             return;
         }
-
         task_handle.ticked_at(heartbeat.timestamp);
-
         match task_handle.status {
             TaskStatus::Starting => {
                 task_handle.mark(TaskStatus::Healthy);
@@ -137,7 +161,6 @@ where
         let Some(task_handle) = self.tasks.get_mut(&task_id) else {
             return;
         };
-
         task_handle.clean_before_restart();
         Self::start_task(task_id, task_handle, self.tx.clone()).await;
     }
@@ -149,24 +172,21 @@ where
             .filter(|(_, handle)| handle.has_crashed(self.timeout_treshold))
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-
         for crashed_task in crashed_tasks {
             let Some(task_handle) = self.tasks.get_mut(&crashed_task) else {
                 return;
             };
-
             if task_handle.has_exceeded_max_retries() && task_handle.status != TaskStatus::Dead {
                 task_handle.mark(TaskStatus::Dead);
                 continue;
             }
-
             let restart_delay = task_handle.restart_delay();
             task_handle.mark(TaskStatus::Failed);
             task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
             let tx = self.tx.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(restart_delay).await;
-                let _ = tx.send(SupervisorMessage::Restart(crashed_task));
+                let _ = tx.send(SupervisedTaskMessage::Restart(crashed_task));
             });
         }
     }
@@ -177,53 +197,5 @@ where
                 .tasks
                 .values()
                 .all(|handle| handle.status == TaskStatus::Dead)
-    }
-}
-
-// TODO: We should be able to configure:
-// * max_restarts,
-// * base_restart_delay,
-#[derive(Debug)]
-pub struct SupervisorBuilder<T: SupervisedTask> {
-    tasks: HashMap<TaskId, TaskHandle<T>>,
-}
-
-impl<T: SupervisedTask> SupervisorBuilder<T> {
-    pub fn new() -> Self {
-        Self {
-            tasks: HashMap::new(),
-        }
-    }
-
-    pub fn with_task(mut self, task: T) -> Self {
-        self.tasks.insert(Uuid::new_v4(), TaskHandle::new(task));
-        self
-    }
-
-    pub fn with_tasks<I>(mut self, tasks: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-    {
-        for task in tasks {
-            self = self.with_task(task);
-        }
-        self
-    }
-
-    pub fn build(self) -> Supervisor<T> {
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        Supervisor {
-            tasks: self.tasks,
-            timeout_treshold: Duration::from_secs(2),
-            tx,
-            rx,
-        }
-    }
-}
-
-impl<T: SupervisedTask> Default for SupervisorBuilder<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }

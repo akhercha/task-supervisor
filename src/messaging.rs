@@ -1,12 +1,18 @@
 use std::time::Instant;
 
-use crate::supervisor::TaskId;
+use crate::{supervisor::TaskId, SupervisedTask};
 
 #[derive(Debug, Clone)]
-pub(crate) enum SupervisorMessage {
-    // Sent by tasks to indicate they are alive
+pub enum SupervisorMessage<T: SupervisedTask> {
+    /// Sent externally to add a new task to the supervisor
+    AddTask(T),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SupervisedTaskMessage {
+    /// Sent by tasks to indicate they are alive
     Heartbeat(Heartbeat),
-    // Sent by the supervisor to itself to trigger a task restart
+    /// Sent by the supervisor to itself to trigger a task restart
     Restart(TaskId),
 }
 

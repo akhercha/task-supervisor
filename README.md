@@ -13,7 +13,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-task-supervisor = "0.1.2"  # Replace with the latest version
+task-supervisor = "0.1.3"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
@@ -25,23 +25,37 @@ async-trait = "0.1"
 Tasks must implement the `SupervisedTask` trait, which requires an error type and the run_forever method:
 
 ```rust
+use anyhow::bail;
+use async_trait::async_trait;
 use std::time::Duration;
-
 use task_supervisor::SupervisedTask;
 
-// Tasks needs to be Clonable for now for easy restarts - will probably change.
-#[derive(Clone)]
-struct MyTask;
+// Tasks need to be Cloneable for now for easy restarts
+#[derive(Clone, Default)]
+struct MyTask {
+    pub emoji: char,
+}
 
-#[async_trait::async_trait]
+impl MyTask {
+    fn new(emoji: char) -> Self {
+        Self { emoji }
+    }
+}
+
+#[async_trait]
 impl SupervisedTask for MyTask {
-    // Using anyhow for simplicity but could be your Error type
     type Error = anyhow::Error;
 
     async fn run_forever(&mut self) -> anyhow::Result<()> {
+        let mut i = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            println!("Task is running!");
+            println!("{} Task is running!", self.emoji);
+            i += 1;
+            if i == 5 {
+                println!("{} Task is failing after 5 iterations...", self.emoji);
+                bail!("Task failed after 5 iterations");
+            }
         }
     }
 }
@@ -56,18 +70,33 @@ use task_supervisor::SupervisorBuilder;
 
 #[tokio::main]
 async fn main() {
-    let mut supervisor = SupervisorBuilder::default()
-        .with_task(MyTask)
+    // Build the supervisor with initial tasks
+    let supervisor = SupervisorBuilder::default()
+        .with_task(MyTask::new('🥴'))
+        .with_task(MyTask::new('🧑'))
+        .with_task(MyTask::new('😸'))
+        .with_task(MyTask::new('👽'))
         .build();
 
-    supervisor.run_and_supervise().await; // yields if all the tasks are Dead
+    // Run the supervisor and get the handle
+    let handle = supervisor.run();
+
+    // Add a new task after 5 seconds
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    println!("Adding a new task after 5 seconds...");
+    handle.add_task(MyTask::new('🆕'));
+
+    // Wait for all tasks to die
+    handle.wait().await;
+    println!("All tasks died! 🫡");
 }
 ```
 
 The supervisor will:
-1. Start all tasks, each running its `run_forever` logic.
-2. Send heartbeats every second to confirm task health.
-3. Restart tasks that fail or miss heartbeats.
+1. Start all initial tasks, each running its run_forever logic.
+2. Monitor each task that fail or miss heartbeats & restart them.
+3. Allow dynamic addition of new tasks via the SupervisorHandle.
+4. Exit when all tasks are marked as Dead (e.g., after exceeding restart attempts).
 
 ## Contributing
 

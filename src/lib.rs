@@ -13,49 +13,80 @@
 //!   and restarts them if they crash or exceed a configurable timeout threshold. It uses a message-passing
 //!   system to coordinate task supervision.
 //!
-//! - **[`SupervisorBuilder`]**: Implements the builder to construct a `Supervisor` instance,
-//!   allowing tasks to be added.
+//! - **[`SupervisorBuilder`]**: Implements the builder pattern to construct a `Supervisor` instance,
+//!   allowing tasks to be added before starting supervision.
+//!
+//! - **[`SupervisorHandle`]**: Provides a handle to interact with a running supervisor, enabling
+//!   dynamic addition of new tasks and waiting for all tasks to complete (i.e., reach the `Dead` state).
 //!
 //! - **[`TaskStatus`] Enum**: Represents the lifecycle states of a supervised task, such as `Created`,
 //!   `Healthy`, `Failed`, or `Dead`.
 //!
 //! ## Usage Example
 //!
-//! Below is a simple example demonstrating how to define and supervise a task:
+//! Below is an example demonstrating how to define a supervised task and use the supervisor to manage it:
 //!
 //! ```rust
-//! use supervisor::{SupervisedTask, SupervisorBuilder};
+//! use anyhow::anyhow;
 //! use async_trait::async_trait;
 //! use std::time::Duration;
+//! use task_supervisor::{SupervisedTask, SupervisorBuilder};
 //!
-//! // Tasks needs to be Clonable for now for easy restarts
-//! #[derive(Clone)]
-//! struct MyTask;
+//! // Tasks need to be Cloneable for now for easy restarts
+//! #[derive(Clone, Default)]
+//! struct MyTask {
+//!     pub emoji: char,
+//! }
+//!
+//! impl MyTask {
+//!     fn new(emoji: char) -> Self {
+//!         Self { emoji }
+//!     }
+//! }
 //!
 //! #[async_trait]
 //! impl SupervisedTask for MyTask {
-//!     // Using anyhow for simplicity but could be your Error type
 //!     type Error = anyhow::Error;
 //!
 //!     async fn run_forever(&mut self) -> anyhow::Result<()> {
+//!         let mut i = 0;
 //!         loop {
 //!             tokio::time::sleep(Duration::from_secs(1)).await;
-//!             println!("Task is running");
+//!             println!("{} Task is running!", self.emoji);
+//!             i += 1;
+//!             if i == 5 {
+//!                 println!("{} Task is failing after 5 iterations...", self.emoji);
+//!                 return Err(anyhow!("Task failed after 5 iterations"));
+//!             }
 //!         }
 //!     }
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut supervisor = SupervisorBuilder::default()
-//!         .with_task(MyTask)
+//!     // Build the supervisor with initial tasks
+//!     let supervisor = SupervisorBuilder::default()
+//!         .with_task(MyTask::new('🥴'))
+//!         .with_task(MyTask::new('🧑'))
+//!         .with_task(MyTask::new('😸'))
+//!         .with_task(MyTask::new('👽'))
 //!         .build();
 //!
-//!     supervisor.run_and_supervise().await; // yields if all tasks are Dead
+//!     // Run the supervisor and get the handle
+//!     let handle = supervisor.run();
+//!
+//!     // Add a new task after 5 seconds
+//!     tokio::time::sleep(Duration::from_secs(5)).await;
+//!     println!("Adding a new task after 5 seconds...");
+//!     handle.add_task(MyTask::new('🆕'));
+//!
+//!     // Wait for all tasks to die
+//!     handle.wait().await;
+//!     println!("All tasks died! 🫡");
 //! }
 //! ```
 //!
-pub use supervisor::{Supervisor, SupervisorBuilder};
+pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
 pub use task::{SupervisedTask, TaskStatus};
 
 mod messaging;
