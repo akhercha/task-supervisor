@@ -27,24 +27,24 @@ Tasks must implement the `SupervisedTask` trait, which requires an error type an
 ```rust
 use std::time::Duration;
 
-use async_trait::async_trait;
 use task_supervisor::SupervisedTask;
 
 #[derive(Clone)]
 struct MyTask;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl SupervisedTask for MyTask {
-    type Error = std::io::Error;
+    // Using anyhow for simplicity but could be your Error type
+    type Error = anyhow::Result;
 
     fn name(&self) -> Option<&str> {
         Some("my_task")
     }
 
-    async fn run_forever(&mut self) -> Result<(), Self::Error> {
+    async fn run_forever(&mut self) -> anyhow::Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            println!("Task is running");
+            println!("Task is running!");
         }
     }
 }
@@ -68,7 +68,7 @@ async fn main() {
 ```
 
 The supervisor will:
-1. Start all tasks, each running its run_forever logic.
+1. Start all tasks, each running its `run_forever` logic.
 2. Send heartbeats every second to confirm task health.
 3. Restart tasks that fail or miss heartbeats.
 

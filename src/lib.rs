@@ -33,13 +33,14 @@
 //!
 //! #[async_trait]
 //! impl SupervisedTask for MyTask {
-//!     type Error = std::io::Error;
+//!     // Using anyhow for simplicity but could be your Error type
+//!     type Error = anyhow::Result;
 //!
 //!     fn name(&self) -> Option<&str> {
 //!         Some("my_task")
 //!     }
 //!
-//!     async fn run_forever(&mut self) -> Result<(), Self::Error> {
+//!     async fn run_forever(&mut self) -> anyhow::Result<()> {
 //!         loop {
 //!             tokio::time::sleep(Duration::from_secs(1)).await;
 //!             println!("Task is running");
