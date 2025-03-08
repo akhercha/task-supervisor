@@ -14,3 +14,4 @@ license = "MIT"
 tokio = { version = "^1.43.0", features = ["full"] }
 async-trait = "0.1.87"
 futures = "0.3.31"
+uuid = { version = "1.15.1", features = ["v4"] }
