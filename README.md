@@ -16,9 +16,9 @@ tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
 
-## Usage
+## Usage
 
-### 1. Defining a Supervised Task
+### 1. Defining a Supervised Task
 
 Tasks must implement the `SupervisedTask` trait, which requires an error type and the run_forever method:
 
@@ -47,7 +47,7 @@ impl SupervisedTask for MyTask {
 }
 ```
 
-### 2. Setting Up and Running the Supervisor
+### 2. Setting Up and Running the Supervisor
 
 Use the `SupervisorBuilder` to create a supervisor and start supervising tasks:
 
