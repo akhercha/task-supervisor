@@ -13,7 +13,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-supervisor = "0.1.0"  # Replace with the latest version
+task-supervisor = "0.1.0"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
@@ -25,9 +25,10 @@ async-trait = "0.1"
 Tasks must implement the `SupervisedTask` trait, which requires an error type and the run_forever method:
 
 ```rust
-use supervisor::SupervisedTask;
-use async_trait::async_trait;
 use std::time::Duration;
+
+use async_trait::async_trait;
+use task_supervisor::SupervisedTask;
 
 #[derive(Clone)]
 struct MyTask;
@@ -54,7 +55,7 @@ impl SupervisedTask for MyTask {
 Use the `SupervisorBuilder` to create a supervisor and start supervising tasks:
 
 ```rust
-use supervisor::SupervisorBuilder;
+use task_supervisor::SupervisorBuilder;
 
 #[tokio::main]
 async fn main() {
