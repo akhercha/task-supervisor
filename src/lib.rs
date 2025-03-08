@@ -34,7 +34,7 @@
 //! #[async_trait]
 //! impl SupervisedTask for MyTask {
 //!     // Using anyhow for simplicity but could be your Error type
-//!     type Error = anyhow::Result;
+//!     type Error = anyhow::Error;
 //!
 //!     fn name(&self) -> Option<&str> {
 //!         Some("my_task")

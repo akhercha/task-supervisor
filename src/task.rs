@@ -4,10 +4,6 @@ use std::time::{Duration, Instant};
 pub trait SupervisedTask {
     type Error: Send;
 
-    fn name(&self) -> Option<&str> {
-        None
-    }
-
     async fn run_forever(&mut self) -> Result<(), Self::Error>;
 }
 
@@ -33,6 +29,7 @@ pub(crate) struct TaskHandle<T: SupervisedTask> {
     pub(crate) handle: Option<tokio::task::JoinHandle<()>>,
     pub(crate) last_heartbeat: Option<Instant>,
     pub(crate) restart_attempts: u32,
+    pub(crate) healthy_since: Option<Instant>,
     max_restart_attempts: u32,
     base_restart_delay: Duration,
 }
@@ -45,6 +42,7 @@ impl<T: SupervisedTask> TaskHandle<T> {
             handle: None,
             last_heartbeat: None,
             restart_attempts: 0,
+            healthy_since: None,
             max_restart_attempts: 5,
             base_restart_delay: Duration::from_secs(1),
         }
@@ -61,9 +59,9 @@ impl<T: SupervisedTask> TaskHandle<T> {
 
     pub(crate) fn has_crashed(&self, timeout_threshold: Duration) -> bool {
         let Some(time_since_last_heartbeat) = self.time_since_last_heartbeat() else {
-            return self.status != TaskStatus::Dead;
+            return !self.is_ko();
         };
-        (self.status != TaskStatus::Dead) && (time_since_last_heartbeat > timeout_threshold)
+        (!self.is_ko()) && (time_since_last_heartbeat > timeout_threshold)
     }
 
     pub(crate) fn restart_delay(&self) -> Duration {
@@ -81,8 +79,13 @@ impl<T: SupervisedTask> TaskHandle<T> {
 
     pub(crate) fn clean_before_restart(&mut self) {
         self.last_heartbeat = None;
+        self.healthy_since = None;
         if let Some(still_running_task) = self.handle.take() {
             still_running_task.abort();
         }
+    }
+
+    pub(crate) fn is_ko(&self) -> bool {
+        (self.status == TaskStatus::Failed) || (self.status == TaskStatus::Dead)
     }
 }

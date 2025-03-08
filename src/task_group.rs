@@ -24,7 +24,7 @@ impl<T> TaskGroup<T> {
         if handles.is_empty() {
             return;
         }
-        let (_first_res, _, remaining) = select_all(handles).await;
+        let (_, _, remaining) = select_all(handles).await;
         for task in remaining {
             task.abort();
         }

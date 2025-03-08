@@ -1,8 +1,8 @@
 [package]
 name = "task-supervisor"
-version = "0.1.1"
-edition = "2024"
-rust-version = "1.85"
+version = "0.1.2"
+edition = "2021"
+rust-version = "1.81"
 categories = ["asynchronous"]
 description = "Tokio tasks Supervisor"
 authors = ["akhercha <adel@pragma.build>"]
@@ -15,3 +15,6 @@ tokio = { version = "^1.43.0", features = ["full"] }
 async-trait = "0.1.87"
 futures = "0.3.31"
 uuid = { version = "1.15.1", features = ["v4"] }
+
+[dev-dependencies]
+anyhow = "1.0.97"
