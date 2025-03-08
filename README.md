@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use task_supervisor::SupervisedTask;
 
+// Tasks needs to be Clonable for now for easy restarts - will probably change.
 #[derive(Clone)]
 struct MyTask;
 
@@ -36,10 +37,6 @@ struct MyTask;
 impl SupervisedTask for MyTask {
     // Using anyhow for simplicity but could be your Error type
     type Error = anyhow::Error;
-
-    fn name(&self) -> Option<&str> {
-        Some("my_task")
-    }
 
     async fn run_forever(&mut self) -> anyhow::Result<()> {
         loop {
@@ -63,7 +60,7 @@ async fn main() {
         .with_task(MyTask)
         .build();
 
-    supervisor.run_and_supervise().await;
+    supervisor.run_and_supervise().await; // yields if all the tasks are Dead
 }
 ```
 
@@ -71,20 +68,6 @@ The supervisor will:
 1. Start all tasks, each running its `run_forever` logic.
 2. Send heartbeats every second to confirm task health.
 3. Restart tasks that fail or miss heartbeats.
-
-
-### 3. Checking Task Status
-
-Retrieve the status of all tasks at any time:
-
-```rust
-let statuses = supervisor.task_statuses();
-for (name, status) in statuses {
-    println!("Task '{}': {:?}", name, status);
-}
-```
-
-Statuses include `Created`, `Starting`, `Healthy`, `Failed`, and `Dead`.
 
 ## Contributing
 

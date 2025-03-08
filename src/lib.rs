@@ -28,6 +28,7 @@
 //! use async_trait::async_trait;
 //! use std::time::Duration;
 //!
+//! // Tasks needs to be Clonable for now for easy restarts
 //! #[derive(Clone)]
 //! struct MyTask;
 //!
@@ -35,10 +36,6 @@
 //! impl SupervisedTask for MyTask {
 //!     // Using anyhow for simplicity but could be your Error type
 //!     type Error = anyhow::Error;
-//!
-//!     fn name(&self) -> Option<&str> {
-//!         Some("my_task")
-//!     }
 //!
 //!     async fn run_forever(&mut self) -> anyhow::Result<()> {
 //!         loop {
@@ -54,7 +51,7 @@
 //!         .with_task(MyTask)
 //!         .build();
 //!
-//!     supervisor.run_and_supervise().await;
+//!     supervisor.run_and_supervise().await; // yields if all tasks are Dead
 //! }
 //! ```
 //!
