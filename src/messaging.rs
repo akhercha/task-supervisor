@@ -4,9 +4,9 @@ type TaskName = String;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SupervisorMessage {
-    // Sent by sources to indicate they are alive
+    // Sent by tasks to indicate they are alive
     Heartbeat(Heartbeat),
-    // Sent by the supervisor to itself to trigger a source restart
+    // Sent by the supervisor to itself to trigger a task restart
     Restart(TaskName),
 }
 

@@ -98,25 +98,25 @@ where
         }
     }
 
-    async fn restart_task(&mut self, source_name: String) {
-        let Some(task_handle) = self.tasks.get_mut(&source_name) else {
+    async fn restart_task(&mut self, task_name: String) {
+        let Some(task_handle) = self.tasks.get_mut(&task_name) else {
             return;
         };
 
         task_handle.clean_before_restart();
-        Self::start_task(source_name, task_handle, self.tx.clone()).await;
+        Self::start_task(task_name, task_handle, self.tx.clone()).await;
     }
 
     fn check_all_health(&mut self) {
-        let crashed_sources = self
+        let crashed_tasks = self
             .tasks
             .iter()
             .filter(|(_, handle)| handle.has_crashed(self.timeout_treshold))
             .map(|(name, _)| name.clone())
             .collect::<Vec<_>>();
 
-        for crashed_source in crashed_sources {
-            let Some(task_handle) = self.tasks.get_mut(&crashed_source) else {
+        for crashed_task in crashed_tasks {
+            let Some(task_handle) = self.tasks.get_mut(&crashed_task) else {
                 return;
             };
 
@@ -131,7 +131,7 @@ where
             let tx = self.tx.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(restart_delay).await;
-                let _ = tx.send(SupervisorMessage::Restart(crashed_source));
+                let _ = tx.send(SupervisorMessage::Restart(crashed_task));
             });
         }
     }
