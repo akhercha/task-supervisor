@@ -7,25 +7,26 @@ use crate::{task::TaskHandle, SupervisedTask, Supervisor, TaskName};
 // TODO: We should be able to configure:
 // * max_restarts,
 // * base_restart_delay,
-pub struct SupervisorBuilder<T: SupervisedTask> {
-    tasks: HashMap<TaskName, TaskHandle<T>>,
+pub struct SupervisorBuilder {
+    tasks: HashMap<TaskName, TaskHandle>,
 }
 
-impl<T: SupervisedTask> SupervisorBuilder<T> {
+impl SupervisorBuilder {
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
         }
     }
 
-    pub fn with_task(mut self, name: String, task: T) -> Self {
+    pub fn with_task<T: SupervisedTask + 'static>(mut self, name: String, task: T) -> Self {
         self.tasks.insert(name, TaskHandle::new(task));
         self
     }
 
-    pub fn with_tasks<I>(mut self, tasks: I) -> Self
+    pub fn with_tasks<I, T>(mut self, tasks: I) -> Self
     where
         I: IntoIterator<Item = (TaskName, T)>,
+        T: SupervisedTask + 'static,
     {
         for (task_name, task) in tasks {
             self = self.with_task(task_name, task);
@@ -33,7 +34,7 @@ impl<T: SupervisedTask> SupervisorBuilder<T> {
         self
     }
 
-    pub fn build(self) -> Supervisor<T> {
+    pub fn build(self) -> Supervisor {
         let (tx, rx) = mpsc::unbounded_channel();
         let (user_tx, user_rx) = mpsc::unbounded_channel();
         Supervisor {
@@ -47,7 +48,7 @@ impl<T: SupervisedTask> SupervisorBuilder<T> {
     }
 }
 
-impl<T: SupervisedTask> Default for SupervisorBuilder<T> {
+impl Default for SupervisorBuilder {
     fn default() -> Self {
         Self::new()
     }

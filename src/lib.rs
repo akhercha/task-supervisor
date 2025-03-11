@@ -87,7 +87,7 @@
 //! ```
 //!
 pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
-pub use task::{SupervisedTask, TaskStatus};
+pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 
 mod supervisor;
 mod task;

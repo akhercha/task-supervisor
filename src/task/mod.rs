@@ -1,10 +1,27 @@
 use std::time::{Duration, Instant};
 
-#[async_trait::async_trait]
-pub trait SupervisedTask {
-    type Error: Send;
+pub type DynTask = Box<dyn SupervisedTask>;
 
-    async fn run_forever(&mut self) -> Result<(), Self::Error>;
+#[async_trait::async_trait]
+pub trait SupervisedTask: Send + 'static {
+    /// Run the task until completion or failure
+    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Clone the current task.
+    /// TODO: Remove this.
+    fn clone_task(&self) -> Box<dyn SupervisedTask>;
+
+    /// Optional method for tasks that genuinely run forever
+    async fn run_forever(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Default implementation continually restarts the task
+        loop {
+            match self.run().await {
+                Ok(TaskOutcome::Completed) => return Ok(()),
+                Ok(TaskOutcome::Failed(_)) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
 }
 
 /// Status of a task
@@ -18,14 +35,23 @@ pub enum TaskStatus {
     Healthy,
     /// Task failed and will be restarted
     Failed,
+    /// Task successfully completed its work
+    Completed,
     /// Task has exceeded max retries & we stopped trying
     Dead,
 }
 
-#[derive(Debug)]
-pub(crate) struct TaskHandle<T: SupervisedTask> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskOutcome {
+    /// Task completed its work successfully and should not be restarted
+    Completed,
+    /// Task encountered an error but should be restarted
+    Failed(String), // Optional error context
+}
+
+pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
-    pub(crate) task: T,
+    pub(crate) task: DynTask,
     pub(crate) handle: Option<tokio::task::JoinHandle<()>>,
     pub(crate) last_heartbeat: Option<Instant>,
     pub(crate) restart_attempts: u32,
@@ -34,8 +60,21 @@ pub(crate) struct TaskHandle<T: SupervisedTask> {
     base_restart_delay: Duration,
 }
 
-impl<T: SupervisedTask> TaskHandle<T> {
-    pub(crate) fn new(task: T) -> Self {
+impl TaskHandle {
+    pub(crate) fn new<T: SupervisedTask + 'static>(task: T) -> Self {
+        Self {
+            status: TaskStatus::Created,
+            task: Box::new(task),
+            handle: None,
+            last_heartbeat: None,
+            restart_attempts: 0,
+            healthy_since: None,
+            max_restart_attempts: 5,
+            base_restart_delay: Duration::from_secs(1),
+        }
+    }
+
+    pub(crate) fn from_dyn_task(task: Box<dyn SupervisedTask>) -> Self {
         Self {
             status: TaskStatus::Created,
             task,
