@@ -5,13 +5,13 @@ use tokio::{
 
 use crate::{SupervisedTask, TaskName};
 
+type SendResult<T> = Result<(), mpsc::error::SendError<SupervisorMessage<T>>>;
+
 #[derive(Debug, Clone)]
 pub enum SupervisorMessage<T: SupervisedTask> {
-    /// Sent externally to add a new task to the supervisor
     AddTask(T),
-    /// Sent externally to kill task from the supervisor
+    RestartTask(TaskName),
     KillTask(TaskName),
-    /// Sent externally to kill all tasks ran by the supervisor
     Shutdown,
 }
 
@@ -23,26 +23,28 @@ pub struct SupervisorHandle<T: SupervisedTask> {
 }
 
 impl<T: SupervisedTask> SupervisorHandle<T> {
-    /// Adds a new task to the running supervisor.
-    pub fn add_task(&self, task: T) -> Result<(), mpsc::error::SendError<SupervisorMessage<T>>> {
-        self.tx.send(SupervisorMessage::AddTask(task))
-    }
-
-    /// Waits for the supervisor to complete (i.e., when all tasks are dead).
+    /// Waits for the supervisor to complete (i.e., when all tasks completed/ are dead).
     pub async fn wait(self) -> Result<(), JoinError> {
         self.join_handle.await
     }
 
+    /// Adds a new task to the running supervisor.
+    pub fn add_task(&self, task: T) -> SendResult<T> {
+        self.tx.send(SupervisorMessage::AddTask(task))
+    }
+
+    /// Restart a running task.
+    pub async fn restart(self, task_name: TaskName) -> SendResult<T> {
+        self.tx.send(SupervisorMessage::RestartTask(task_name))
+    }
+
     /// Send a message to kill a task from the Supervisor.
-    pub async fn kill_task(
-        self,
-        task_name: TaskName,
-    ) -> Result<(), mpsc::error::SendError<SupervisorMessage<T>>> {
+    pub async fn kill_task(self, task_name: TaskName) -> SendResult<T> {
         self.tx.send(SupervisorMessage::KillTask(task_name))
     }
 
     /// Shutdown all the tasks.
-    pub async fn shutdown(self) -> Result<(), mpsc::error::SendError<SupervisorMessage<T>>> {
+    pub async fn shutdown(self) -> SendResult<T> {
         self.tx.send(SupervisorMessage::Shutdown)
     }
 }

@@ -154,6 +154,9 @@ where
             TaskGroup::new()
                 .with_handle(ran_task)
                 .with_handle(heartbeat_task)
+                // TODO: This is not always good.
+                // We may want to a run task and if it resolves it's actually
+                // intended? And we don't want to restart it?
                 .abort_all_if_one_resolves()
                 .await
         });
