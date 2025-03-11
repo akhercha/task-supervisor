@@ -64,10 +64,7 @@ impl Supervisor {
         let handle = tokio::spawn(async move {
             self.run_and_supervise().await;
         });
-        SupervisorHandle {
-            tx: user_tx,
-            join_handle: handle,
-        }
+        SupervisorHandle::new(handle, user_tx)
     }
 
     /// Internal method to start and supervise all tasks.
