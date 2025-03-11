@@ -3,12 +3,13 @@
 //! The `task-supervisor` crate provides a lightweight framework for managing and monitoring asynchronous tasks
 //! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health via heartbeats
 //! and automatically restarting them if they fail or become unresponsive. The supervisor also supports dynamic
-//! task management, allowing tasks to be added, restarted, or killed at runtime.
+//! task management, allowing tasks to be added, restarted, or killed at runtime, as well as querying the status of tasks.
 //!
 //! ## Key Features
 //!
 //! - **Task Supervision**: Monitors tasks using heartbeats and restarts them if they crash or exceed a configurable timeout.
 //! - **Dynamic Task Management**: Add, restart, or kill tasks dynamically via the `SupervisorHandle`.
+//! - **Task Status Querying**: Retrieve the status of individual tasks or all tasks using the `SupervisorHandle`.
 //! - **Configurable Parameters**: Customize timeout thresholds, heartbeat intervals, and health check timings.
 //! - **Proper Task Cancellation**: Ensures tasks are properly stopped during restarts or when killed using a `CancellationToken`.
 //! - **Task Completion Handling**: Differentiates between tasks that complete successfully and those that fail, with appropriate actions.
@@ -27,19 +28,20 @@
 //!   timeout thresholds, heartbeat intervals, and health check timings. Allows adding initial tasks before starting the supervisor.
 //!
 //! - **[`SupervisorHandle`]**: Offers a handle to interact with a running supervisor, enabling dynamic operations like adding new tasks,
-//!   restarting tasks, killing tasks, and shutting down the supervisor. It also provides a `wait` method to await the completion of all tasks.
+//!   restarting tasks, killing tasks, and shutting down the supervisor. It also provides methods to query the status of individual tasks
+//!   or all tasks, and a `wait` method to await the completion of all tasks.
 //!
 //! - **[`TaskStatus`] Enum**: Represents the lifecycle states of a supervised task, such as `Created`, `Starting`, `Healthy`, `Failed`,
 //!   `Completed`, or `Dead`.
 //!
 //! ## Usage Example
 //!
-//! Below is an example demonstrating how to define a supervised task and use the supervisor to manage it:
+//! Below is an example demonstrating how to define a supervised task, use the supervisor to manage it, and query task statuses:
 //!
 //! ```rust
 //! use async_trait::async_trait;
 //! use std::time::Duration;
-//! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome};
+//! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome, SupervisorHandleError};
 //!
 //! #[derive(Clone)]
 //! struct MyTask {
@@ -63,7 +65,7 @@
 //! }
 //!
 //! #[tokio::main]
-//! async fn main() {
+//! async fn main() -> Result<(), SupervisorHandleError> {
 //!     // Build the supervisor with initial tasks
 //!     let supervisor = SupervisorBuilder::default().build();
 //!
@@ -75,22 +77,43 @@
 //!         // Add a new task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Adding a task after 5 seconds...");
-//!         h.add_task("task".into(), MyTask { emoji: '🆕' }).unwrap();
+//!         h.add_task("task".into(), MyTask { emoji: '🆕' })?;
+//!
+//!         // Query the task status after 2 seconds
+//!         tokio::time::sleep(Duration::from_secs(2)).await;
+//!         match h.get_task_status("task".into()).await {
+//!             Ok(Some(status)) => println!("Task status: {:?}", status),
+//!             Ok(None) => println!("Task not found"),
+//!             Err(e) => println!("Error getting task status: {}", e),
+//!         }
 //!
 //!         // Restart the task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Restarting task after 5 seconds...");
-//!         h.restart("task".into()).unwrap();
+//!         h.restart("task".into())?;
+//!
+//!         // Query all task statuses after 2 seconds
+//!         tokio::time::sleep(Duration::from_secs(2)).await;
+//!         match h.get_all_task_statuses().await {
+//!             Ok(statuses) => {
+//!                 println!("All task statuses:");
+//!                 for (name, status) in statuses {
+//!                     println!("  {}: {:?}", name, status);
+//!                 }
+//!             }
+//!             Err(e) => println!("Error getting all task statuses: {}", e),
+//!         }
 //!
 //!         // Kill the task after another 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Killing task after 5 seconds...");
-//!         h.kill_task("task".into()).unwrap();
+//!         h.kill_task("task".into())?;
 //!     });
 //!
 //!     // Wait for all tasks to die
-//!     let _ = handle.wait().await;
+//!     handle.wait().await?;
 //!     println!("All tasks died! 🫡");
+//!     Ok(())
 //! }
 //! ```
 //!

@@ -13,7 +13,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-task-supervisor = "0.1.4"  # Replace with the latest version
+task-supervisor = "0.1.5"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
@@ -62,11 +62,11 @@ A task can run forever and never return any token.
 Use the `SupervisorBuilder` to create a supervisor and start supervising tasks. The `SupervisorHandle` allows dynamic task management:
 
 ```rust
-use task_supervisor::SupervisorBuilder;
+use task_supervisor::{SupervisorBuilder, SupervisorHandleError};
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), SupervisorHandleError> {
     // Build the supervisor with initial tasks
     let supervisor = SupervisorBuilder::default().build();
 
@@ -78,30 +78,53 @@ async fn main() {
         // Add a new task after 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Adding a task after 5 seconds...");
-        h.add_task("task".into(), MyTask { emoji: '🆕' }).unwrap();
+        h.add_task("task".into(), MyTask { emoji: '🆕' })?;
+
+        // Query the task status after 2 seconds
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        match h.get_task_status("task".into()).await {
+            Ok(Some(status)) => println!("Task status: {:?}", status),
+            Ok(None) => println!("Task not found"),
+            Err(e) => println!("Error getting task status: {}", e),
+        }
 
         // Restart the task after 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Restarting task after 5 seconds...");
-        h.restart("task".into()).unwrap();
+        h.restart("task".into())?;
+
+        // Query all task statuses after 2 seconds
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        match h.get_all_task_statuses().await {
+            Ok(statuses) => {
+                println!("All task statuses:");
+                for (name, status) in statuses {
+                    println!("  {}: {:?}", name, status);
+                }
+            }
+            Err(e) => println!("Error getting all task statuses: {}", e),
+        }
 
         // Kill the task after another 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Killing task after 5 seconds...");
-        h.kill_task("task".into()).unwrap();
-    });
+        h.kill_task("task".into())?;
+        Ok(())
+    })?;
 
     // Wait for all tasks to die
-    let _ = handle.wait().await;
+    handle.wait().await?;
     println!("All tasks died! 🫡");
+    Ok(())
 }
 ```
 
 The supervisor will:
-1. Start all initial tasks, each executing its run logic.
+1. Start all initial tasks, executing their run logic.
 2. Monitor tasks via heartbeats, restarting them if they fail or become unresponsive.
-3. Enable dynamic addition, restarting, and killing of tasks using the SupervisorHandle.
-4. Exit when all tasks are marked as Dead or Completed.
+3. Allow dynamic task management (add, restart, kill) via the SupervisorHandle.
+4. Provide task status querying for individual tasks (get_task_status) or all tasks (get_all_task_statuses).
+5. Exit when all tasks are marked as Dead or Completed.
 
 ## Contributing
 

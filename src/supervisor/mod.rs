@@ -34,7 +34,7 @@ impl Heartbeat {
 }
 
 /// Internal messages sent from tasks and by the `Supervisor` to manage task lifecycle.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum SupervisedTaskMessage {
     /// Sent by tasks to indicate they are alive.
     Heartbeat(Heartbeat),
@@ -102,17 +102,7 @@ impl Supervisor {
         loop {
             tokio::select! {
                 Some(internal_msg) = self.rx.recv() => {
-                    match internal_msg {
-                        SupervisedTaskMessage::Heartbeat(heartbeat) => {
-                            self.register_heartbeat(heartbeat);
-                        },
-                        SupervisedTaskMessage::Restart(task_name) => {
-                            self.restart_task(task_name).await;
-                        },
-                        SupervisedTaskMessage::Completed(task_name, outcome) => {
-                            self.handle_task_completion(task_name, outcome).await;
-                        }
-                    }
+                    self.handle_internal_message(internal_msg).await;
                 },
                 Some(user_msg) = self.external_rx.recv() => {
                     self.handle_user_message(user_msg).await;
@@ -123,6 +113,20 @@ impl Supervisor {
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    async fn handle_internal_message(&mut self, msg: SupervisedTaskMessage) {
+        match msg {
+            SupervisedTaskMessage::Heartbeat(heartbeat) => {
+                self.register_heartbeat(heartbeat);
+            }
+            SupervisedTaskMessage::Restart(task_name) => {
+                self.restart_task(task_name).await;
+            }
+            SupervisedTaskMessage::Completed(task_name, outcome) => {
+                self.handle_task_completion(task_name, outcome).await;
             }
         }
     }
@@ -156,6 +160,18 @@ impl Supervisor {
                 }
                 task_handle.mark(TaskStatus::Dead);
                 task_handle.clean().await;
+            }
+            SupervisorMessage::GetTaskStatus(task_name, sender) => {
+                let status = self.tasks.get(&task_name).map(|handle| handle.status);
+                let _ = sender.send(status);
+            }
+            SupervisorMessage::GetAllTaskStatuses(sender) => {
+                let statuses = self
+                    .tasks
+                    .iter()
+                    .map(|(name, handle)| (name.clone(), handle.status))
+                    .collect();
+                let _ = sender.send(statuses);
             }
             SupervisorMessage::Shutdown => {
                 for (_, task_handle) in self.tasks.iter_mut() {
