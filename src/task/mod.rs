@@ -7,21 +7,8 @@ pub trait SupervisedTask: Send + 'static {
     /// Run the task until completion or failure
     async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Clone the current task.
-    /// TODO: Remove this.
+    /// Clone the current task into a Box.
     fn clone_task(&self) -> Box<dyn SupervisedTask>;
-
-    /// Optional method for tasks that genuinely run forever
-    async fn run_forever(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Default implementation continually restarts the task
-        loop {
-            match self.run().await {
-                Ok(TaskOutcome::Completed) => return Ok(()),
-                Ok(TaskOutcome::Failed(_)) => continue,
-                Err(e) => return Err(e),
-            }
-        }
-    }
 }
 
 /// Status of a task
@@ -116,11 +103,12 @@ impl TaskHandle {
         self.status = status;
     }
 
-    pub(crate) fn clean_before_restart(&mut self) {
+    pub(crate) async fn clean(&mut self) {
         self.last_heartbeat = None;
         self.healthy_since = None;
         if let Some(still_running_task) = self.handle.take() {
             still_running_task.abort();
+            assert!(still_running_task.await.unwrap_err().is_cancelled());
         }
     }
 

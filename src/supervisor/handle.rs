@@ -70,15 +70,15 @@ impl SupervisorHandle {
     }
 
     // Consuming operations need to consider potential shared state
-    pub async fn restart(self, task_name: TaskName) -> SendResult {
+    pub fn restart(&self, task_name: TaskName) -> SendResult {
         self.tx.send(SupervisorMessage::RestartTask(task_name))
     }
 
-    pub async fn kill_task(self, task_name: TaskName) -> SendResult {
+    pub fn kill_task(&self, task_name: TaskName) -> SendResult {
         self.tx.send(SupervisorMessage::KillTask(task_name))
     }
 
-    pub async fn shutdown(self) -> SendResult {
+    pub fn shutdown(&self) -> SendResult {
         self.tx.send(SupervisorMessage::Shutdown)
     }
 }

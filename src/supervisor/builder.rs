@@ -18,19 +18,8 @@ impl SupervisorBuilder {
         }
     }
 
-    pub fn with_task<T: SupervisedTask + 'static>(mut self, name: String, task: T) -> Self {
+    pub fn with_task(mut self, name: String, task: impl SupervisedTask) -> Self {
         self.tasks.insert(name, TaskHandle::new(task));
-        self
-    }
-
-    pub fn with_tasks<I, T>(mut self, tasks: I) -> Self
-    where
-        I: IntoIterator<Item = (TaskName, T)>,
-        T: SupervisedTask + 'static,
-    {
-        for (task_name, task) in tasks {
-            self = self.with_task(task_name, task);
-        }
         self
     }
 

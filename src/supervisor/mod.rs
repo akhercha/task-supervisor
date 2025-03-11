@@ -69,9 +69,6 @@ impl Supervisor {
 
     /// Internal method to start and supervise all tasks.
     async fn run_and_supervise(mut self) {
-        if self.tasks.is_empty() {
-            return;
-        }
         self.start_all_tasks().await;
         self.supervise_all_tasks().await;
     }
@@ -85,7 +82,7 @@ impl Supervisor {
     async fn supervise_all_tasks(&mut self) {
         let mut health_check_interval = interval_at(
             tokio::time::Instant::now() + Duration::from_secs(3),
-            Duration::from_secs(1),
+            Duration::from_millis(200),
         );
 
         loop {
@@ -113,7 +110,7 @@ impl Supervisor {
                 // Periodic health check
                 _ = health_check_interval.tick() => {
                     self.check_all_health();
-                    if self.all_tasks_died() {
+                    if self.all_tasks_finished() {
                         break;
                     }
                 }
@@ -124,8 +121,6 @@ impl Supervisor {
     async fn handle_user_message(&mut self, msg: SupervisorMessage) {
         match msg {
             SupervisorMessage::AddTask(task_name, task) => {
-                // TODO: See what to do. Ignore for now. Should probably return
-                // an error to the User.
                 if self.tasks.contains_key(&task_name) {
                     return;
                 }
@@ -148,14 +143,14 @@ impl Supervisor {
                     return;
                 }
 
-                task_handle.clean_before_restart();
                 task_handle.mark(TaskStatus::Dead);
+                task_handle.clean().await;
             }
 
             SupervisorMessage::Shutdown => {
                 for (_task_name, task_handle) in self.tasks.iter_mut() {
                     if task_handle.status != TaskStatus::Dead {
-                        task_handle.clean_before_restart();
+                        task_handle.clean().await;
                         task_handle.mark(TaskStatus::Dead);
                     }
                 }
@@ -175,13 +170,10 @@ impl Supervisor {
         let (completion_tx, mut completion_rx) = mpsc::channel::<TaskOutcome>(1);
 
         let handle = tokio::spawn(async move {
-            let completion_tx_clone = completion_tx.clone();
-
             let ran_task = tokio::spawn(async move {
                 match task.run().await {
                     Ok(outcome) => {
-                        // Successfully send back the completion status
-                        let _ = completion_tx_clone.send(outcome).await;
+                        let _ = completion_tx.send(outcome).await;
                         Ok(())
                     }
                     Err(e) => Err(e),
@@ -191,7 +183,7 @@ impl Supervisor {
             let task_name_a = task_name_c.clone();
             let tx_a = tx.clone();
             let heartbeat_task = tokio::spawn(async move {
-                let mut beat_interval = tokio::time::interval(Duration::from_millis(500));
+                let mut beat_interval = tokio::time::interval(Duration::from_millis(100));
                 loop {
                     beat_interval.tick().await;
                     let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(&task_name_a));
@@ -205,7 +197,6 @@ impl Supervisor {
             // Add the completion receiver to abort tasks appropriately
             let completion_task = tokio::spawn(async move {
                 if let Some(outcome) = completion_rx.recv().await {
-                    // Send completion notification to supervisor
                     let completion_msg = SupervisedTaskMessage::Completed(task_name_c, outcome);
                     let _ = tx.send(completion_msg);
                 }
@@ -239,7 +230,7 @@ impl Supervisor {
             }
             TaskStatus::Healthy => {
                 if let Some(healthy_since) = task_handle.healthy_since {
-                    const TASK_IS_STABLE_DURATION: Duration = Duration::from_secs(600);
+                    const TASK_IS_STABLE_DURATION: Duration = Duration::from_secs(120);
                     if heartbeat.timestamp.duration_since(healthy_since) > TASK_IS_STABLE_DURATION {
                         task_handle.restart_attempts = 0;
                     }
@@ -255,7 +246,8 @@ impl Supervisor {
         let Some(task_handle) = self.tasks.get_mut(&task_name) else {
             return;
         };
-        task_handle.clean_before_restart();
+        task_handle.clean().await;
+        task_handle.mark(TaskStatus::Created);
         Self::start_task(task_name, task_handle, self.tx.clone()).await;
     }
 
@@ -286,12 +278,11 @@ impl Supervisor {
         }
     }
 
-    fn all_tasks_died(&self) -> bool {
+    fn all_tasks_finished(&self) -> bool {
         !self.tasks.is_empty()
-            && self
-                .tasks
-                .values()
-                .all(|handle| handle.status == TaskStatus::Dead)
+            && self.tasks.values().all(|handle| {
+                (handle.status == TaskStatus::Dead) || (handle.status == TaskStatus::Completed)
+            })
     }
 
     async fn handle_task_completion(&mut self, task_name: TaskName, outcome: TaskOutcome) {
@@ -303,8 +294,6 @@ impl Supervisor {
             TaskOutcome::Completed => {
                 // Task successfully completed - mark as completed and don't restart
                 task_handle.mark(TaskStatus::Completed);
-                // Clean up resources but don't schedule restart
-                task_handle.clean_before_restart();
             }
             TaskOutcome::Failed(_reason) => {
                 // Controlled failure - mark as failed and restart with backoff
