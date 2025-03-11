@@ -1,23 +1,53 @@
 pub(crate) mod builder;
 pub(crate) mod handle;
 
-use std::{collections::HashMap, time::Duration};
-
-use tokio::{
-    sync::mpsc,
-    time::{interval_at, Instant},
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
 };
+
+use handle::SupervisorMessage;
+use tokio::{sync::mpsc, time::interval_at};
 use uuid::Uuid;
 
 use crate::{
-    messaging::{Heartbeat, SupervisedTaskMessage, SupervisorMessage},
     supervisor::handle::SupervisorHandle,
     task::{SupervisedTask, TaskHandle, TaskStatus},
-    task_group::TaskGroup,
+    utils::TaskGroup,
+    TaskId,
 };
 
-pub type TaskId = uuid::Uuid;
+/// A beat sent from a task to indicate that it's alive.
+#[derive(Debug, Clone)]
+pub(crate) struct Heartbeat {
+    pub(crate) task_id: TaskId,
+    pub(crate) timestamp: Instant,
+}
 
+impl Heartbeat {
+    pub fn new(task_id: TaskId) -> Self {
+        Self {
+            task_id,
+            timestamp: Instant::now(),
+        }
+    }
+}
+
+/// Internal messages sent from tasks & by the `Supervisor` itself to restart
+/// tasks.
+#[derive(Debug, Clone)]
+pub(crate) enum SupervisedTaskMessage {
+    /// Sent by tasks to indicate they are alive
+    Heartbeat(Heartbeat),
+    /// Sent by the supervisor to itself to trigger a task restart
+    Restart(TaskId),
+}
+
+/// Main component that handles all the tasks.
+///
+/// Spawn each tasks along with a `Heartbeat` thread tied to the main one,
+/// responsible of proving that the main thread is alive.
+/// If one threads stops, the other stops too.
 pub struct Supervisor<T: SupervisedTask> {
     pub(crate) tasks: HashMap<TaskId, TaskHandle<T>>,
     pub(crate) timeout_treshold: Duration,
@@ -60,7 +90,7 @@ where
 
     async fn supervise_all_tasks(&mut self) {
         let mut health_check_interval = interval_at(
-            Instant::now() + Duration::from_secs(3),
+            tokio::time::Instant::now() + Duration::from_secs(3),
             Duration::from_secs(1),
         );
 
@@ -87,6 +117,7 @@ where
                             Self::start_task(task_id, &mut task_handle, self.tx.clone()).await;
                             self.tasks.insert(task_id, task_handle);
                         }
+                        _ => todo!("Not implemented yet!")
                     }
                 },
 

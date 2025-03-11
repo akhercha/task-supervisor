@@ -89,7 +89,9 @@
 pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
 pub use task::{SupervisedTask, TaskStatus};
 
-mod messaging;
 mod supervisor;
 mod task;
-mod task_group;
+mod utils;
+
+pub type TaskId = uuid::Uuid;
+pub type TaskName = String;
