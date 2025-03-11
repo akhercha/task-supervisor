@@ -47,7 +47,6 @@ impl SupervisorHandle {
     /// Panics if `wait()` has already been called on any clone of this handle.
     /// Only one caller should await the supervisor's completion.
     pub async fn wait(self) -> Result<(), JoinError> {
-        // Try to take ownership of the join handle
         let handle_opt = {
             let mut guard = self.join_handle.lock().await;
             guard.take()
@@ -59,7 +58,6 @@ impl SupervisorHandle {
         }
     }
 
-    // Other methods remain the same, reference operations don't change
     pub fn add_task<T: SupervisedTask + 'static>(
         &self,
         task_name: TaskName,
@@ -69,7 +67,6 @@ impl SupervisorHandle {
             .send(SupervisorMessage::AddTask(task_name, Box::new(task)))
     }
 
-    // Consuming operations need to consider potential shared state
     pub fn restart(&self, task_name: TaskName) -> SendResult {
         self.tx.send(SupervisorMessage::RestartTask(task_name))
     }

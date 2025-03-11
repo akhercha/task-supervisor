@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use tokio_util::sync::CancellationToken;
+
 pub type DynTask = Box<dyn SupervisedTask>;
 pub type TaskError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -41,10 +43,11 @@ pub enum TaskOutcome {
 pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
     pub(crate) task: DynTask,
-    pub(crate) handle: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) handles: Option<Vec<tokio::task::JoinHandle<()>>>,
     pub(crate) last_heartbeat: Option<Instant>,
     pub(crate) restart_attempts: u32,
     pub(crate) healthy_since: Option<Instant>,
+    pub(crate) cancellation_token: Option<CancellationToken>,
     max_restart_attempts: u32,
     base_restart_delay: Duration,
 }
@@ -59,10 +62,11 @@ impl TaskHandle {
         Self {
             status: TaskStatus::Created,
             task: Box::new(task),
-            handle: None,
+            handles: None,
             last_heartbeat: None,
             restart_attempts: 0,
             healthy_since: None,
+            cancellation_token: None,
             max_restart_attempts,
             base_restart_delay,
         }
@@ -75,10 +79,11 @@ impl TaskHandle {
         Self {
             status: TaskStatus::Created,
             task,
-            handle: None,
+            handles: None,
             last_heartbeat: None,
             restart_attempts: 0,
             healthy_since: None,
+            cancellation_token: None,
             max_restart_attempts: MAX_RESTART_ATTEMPS,
             base_restart_delay: BASE_RESTART_DELAY,
         }
@@ -121,11 +126,15 @@ impl TaskHandle {
 
     /// Cleans up the task by aborting its handle and resetting state.
     pub(crate) async fn clean(&mut self) {
+        if let Some(token) = self.cancellation_token.take() {
+            token.cancel();
+        }
         self.last_heartbeat = None;
         self.healthy_since = None;
-        if let Some(handle) = self.handle.take() {
-            handle.abort();
-            assert!(handle.await.unwrap_err().is_cancelled());
+        if let Some(handles) = self.handles.take() {
+            for handle in handles {
+                handle.abort();
+            }
         }
     }
 

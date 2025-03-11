@@ -8,11 +8,11 @@ use std::{
 
 use handle::SupervisorMessage;
 use tokio::{sync::mpsc, time::interval_at};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     supervisor::handle::SupervisorHandle,
-    task::{TaskError, TaskHandle, TaskOutcome, TaskStatus},
-    utils::TaskGroup,
+    task::{TaskHandle, TaskOutcome, TaskStatus},
     TaskName,
 };
 
@@ -175,14 +175,22 @@ impl Supervisor {
         tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
         heartbeat_interval: Duration,
     ) {
-        let mut task = task_handle.task.clone_task();
-        let task_name_c = task_name.clone();
+        let token = CancellationToken::new();
+        let token_main = token.clone();
+        let token_heartbeat = token.clone();
+        let token_completion = token.clone();
 
+        let mut task = task_handle.task.clone_task();
+        let task_name_clone = task_name.clone();
         let (completion_tx, mut completion_rx) = mpsc::channel::<TaskOutcome>(1);
 
-        let handle = tokio::spawn(async move {
-            let ran_task: tokio::task::JoinHandle<Result<(), TaskError>> =
-                tokio::spawn(async move {
+        // Main task
+        let ran_task = tokio::spawn(async move {
+            tokio::select! {
+                _ = token_main.cancelled() => {
+                    // Task cancelled
+                }
+                _ = async {
                     match task.run().await {
                         Ok(outcome) => {
                             let _ = completion_tx.send(outcome).await;
@@ -192,40 +200,49 @@ impl Supervisor {
                             let _ = completion_tx.send(outcome).await;
                         }
                     }
-                    Ok(())
-                });
-
-            let task_name_a = task_name_c.clone();
-            let tx_a = tx.clone();
-            let heartbeat_task = tokio::spawn(async move {
-                let mut beat_interval = tokio::time::interval(heartbeat_interval);
-                loop {
-                    beat_interval.tick().await;
-                    let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(&task_name_a));
-                    if tx_a.send(beat).is_err() {
-                        break;
-                    }
-                }
-                Ok(())
-            });
-
-            let completion_task = tokio::spawn(async move {
-                if let Some(outcome) = completion_rx.recv().await {
-                    let completion_msg = SupervisedTaskMessage::Completed(task_name_c, outcome);
-                    let _ = tx.send(completion_msg);
-                }
-                Ok(())
-            });
-
-            TaskGroup::new()
-                .with_handle(ran_task)
-                .with_handle(heartbeat_task)
-                .with_handle(completion_task)
-                .abort_all_if_one_resolves()
-                .await
+                } => {}
+            }
         });
 
-        task_handle.handle = Some(handle);
+        // Heartbeat task
+        let tx_heartbeat = tx.clone();
+        let task_name_heartbeat = task_name.clone();
+        let heartbeat_task = tokio::spawn(async move {
+            let mut beat_interval = tokio::time::interval(heartbeat_interval);
+            loop {
+                tokio::select! {
+                    _ = beat_interval.tick() => {
+                        let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(&task_name_heartbeat));
+                        if tx_heartbeat.send(beat).is_err() {
+                            break;
+                        }
+                    }
+                    _ = token_heartbeat.cancelled() => {
+                        break; // Stop heartbeat on cancellation
+                    }
+                }
+            }
+        });
+
+        // Completion task
+        let completion_task = tokio::spawn(async move {
+            tokio::select! {
+                _ = token_completion.cancelled() => {
+                    // Task cancelled
+                }
+                outcome = completion_rx.recv() => {
+                    if let Some(outcome) = outcome {
+                        let completion_msg = SupervisedTaskMessage::Completed(task_name_clone, outcome);
+                        let _ = tx.send(completion_msg);
+                        token_completion.cancel(); // Cancel other tasks upon completion
+                    }
+                }
+            }
+        });
+
+        // Store the token and handles in TaskHandle
+        task_handle.cancellation_token = Some(token);
+        task_handle.handles = Some(vec![ran_task, heartbeat_task, completion_task]);
         task_handle.mark(TaskStatus::Starting);
     }
 

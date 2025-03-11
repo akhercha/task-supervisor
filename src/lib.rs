@@ -91,6 +91,5 @@ pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 
 mod supervisor;
 mod task;
-mod utils;
 
 pub type TaskName = String;

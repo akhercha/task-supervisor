@@ -12,6 +12,7 @@ license = "MIT"
 
 [dependencies]
 tokio = { version = "^1.43.0", features = ["full"] }
+tokio-util = "0.7.13"
 async-trait = "0.1.87"
 futures = "0.3.31"
 
