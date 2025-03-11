@@ -53,6 +53,10 @@ impl SupervisedTask for MyTask {
 
 A task can run forever and never return any token.
 
+> [!WARNING]  
+> A task must implement `Clone` for now, since we need to be able to clone it for restarts.
+> This will probably be updated one day.
+
 ### 2. Setting Up and Running the Supervisor
 
 Use the `SupervisorBuilder` to create a supervisor and start supervising tasks. The `SupervisorHandle` allows dynamic task management:
