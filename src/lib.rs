@@ -1,95 +1,103 @@
 //! # Task Supervisor for Tokio
 //!
-//! The `task-supervisor` crate provides a smol framework for managing and monitoring asynchronous tasks
-//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health
-//! via heartbeats and automatically restarting them if they fail or become unresponsive.
+//! The `task-supervisor` crate provides a lightweight framework for managing and monitoring asynchronous tasks
+//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health via heartbeats
+//! and automatically restarting them if they fail or become unresponsive. The supervisor also supports dynamic
+//! task management, allowing tasks to be added, restarted, or killed at runtime.
+//!
+//! ## Key Features
+//!
+//! - **Task Supervision**: Monitors tasks using heartbeats and restarts them if they crash or exceed a configurable timeout.
+//! - **Dynamic Task Management**: Add, restart, or kill tasks dynamically via the `SupervisorHandle`.
+//! - **Configurable Parameters**: Customize timeout thresholds, heartbeat intervals, and health check timings.
+//! - **Proper Task Cancellation**: Ensures tasks are properly stopped during restarts or when killed using a `CancellationToken`.
+//! - **Task Completion Handling**: Differentiates between tasks that complete successfully and those that fail, with appropriate actions.
 //!
 //! ## Key Components
 //!
-//! - **[`SupervisedTask`] Trait**: Defines the interface for tasks to be supervised. Tasks must
-//!   implement the `run_forever` method with their core logic and may optionally provide a `name`.
+//! - **[`SupervisedTask`] Trait**: Defines the interface for tasks to be supervised. Tasks must implement the `run` method,
+//!   which contains the task's logic and returns a `Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>>` indicating
+//!   success or failure. Additionally, tasks must implement `clone_task` to allow the supervisor to create new instances for restarts.
 //!
-//! - **[`Supervisor`] Struct**: Manages a collection of tasks, monitors their health using heartbeats,
-//!   and restarts them if they crash or exceed a configurable timeout threshold. It uses a message-passing
-//!   system to coordinate task supervision.
+//! - **[`Supervisor`] Struct**: Manages a collection of tasks, monitors their health using heartbeats, and restarts them if necessary.
+//!   It uses a message-passing system to handle internal events and user commands. The supervisor ensures that tasks are properly
+//!   cancelled during restarts or when killed using a `CancellationToken`.
 //!
-//! - **[`SupervisorBuilder`]**: Implements the builder pattern to construct a `Supervisor` instance,
-//!   allowing tasks to be added before starting supervision.
+//! - **[`SupervisorBuilder`]**: Provides a builder pattern to construct a `Supervisor` instance with configurable parameters such as
+//!   timeout thresholds, heartbeat intervals, and health check timings. Allows adding initial tasks before starting the supervisor.
 //!
-//! - **[`SupervisorHandle`]**: Provides a handle to interact with a running supervisor, enabling
-//!   dynamic addition of new tasks and waiting for all tasks to complete (i.e., reach the `Dead` state).
+//! - **[`SupervisorHandle`]**: Offers a handle to interact with a running supervisor, enabling dynamic operations like adding new tasks,
+//!   restarting tasks, killing tasks, and shutting down the supervisor. It also provides a `wait` method to await the completion of all tasks.
 //!
-//! - **[`TaskStatus`] Enum**: Represents the lifecycle states of a supervised task, such as `Created`,
-//!   `Healthy`, `Failed`, or `Dead`.
+//! - **[`TaskStatus`] Enum**: Represents the lifecycle states of a supervised task, such as `Created`, `Starting`, `Healthy`, `Failed`,
+//!   `Completed`, or `Dead`.
 //!
 //! ## Usage Example
 //!
 //! Below is an example demonstrating how to define a supervised task and use the supervisor to manage it:
 //!
 //! ```rust
-//! use anyhow::anyhow;
 //! use async_trait::async_trait;
 //! use std::time::Duration;
-//! use task_supervisor::{SupervisedTask, SupervisorBuilder};
+//! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome};
 //!
-//! // Tasks need to be Cloneable for now for easy restarts
-//! #[derive(Clone, Default)]
+//! #[derive(Clone)]
 //! struct MyTask {
 //!     pub emoji: char,
 //! }
 //!
-//! impl MyTask {
-//!     fn new(emoji: char) -> Self {
-//!         Self { emoji }
-//!     }
-//! }
-//!
 //! #[async_trait]
 //! impl SupervisedTask for MyTask {
-//!     type Error = anyhow::Error;
-//!
-//!     async fn run_forever(&mut self) -> anyhow::Result<()> {
-//!         let mut i = 0;
-//!         loop {
-//!             tokio::time::sleep(Duration::from_secs(1)).await;
+//!     async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+//!         for _ in 0..15 {
 //!             println!("{} Task is running!", self.emoji);
-//!             i += 1;
-//!             if i == 5 {
-//!                 println!("{} Task is failing after 5 iterations...", self.emoji);
-//!                 return Err(anyhow!("Task failed after 5 iterations"));
-//!             }
+//!             tokio::time::sleep(Duration::from_secs(1)).await;
 //!         }
+//!         println!("{} Task completed!", self.emoji);
+//!         Ok(TaskOutcome::Completed)
+//!     }
+//!
+//!     fn clone_task(&self) -> Box<dyn SupervisedTask> {
+//!         Box::new(self.clone())
 //!     }
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     // Build the supervisor with initial tasks
-//!     let supervisor = SupervisorBuilder::default()
-//!         .with_task(MyTask::new('🥴'))
-//!         .with_task(MyTask::new('🧑'))
-//!         .with_task(MyTask::new('😸'))
-//!         .with_task(MyTask::new('👽'))
-//!         .build();
+//!     let supervisor = SupervisorBuilder::default().build();
 //!
 //!     // Run the supervisor and get the handle
 //!     let handle = supervisor.run();
 //!
-//!     // Add a new task after 5 seconds
-//!     tokio::time::sleep(Duration::from_secs(5)).await;
-//!     println!("Adding a new task after 5 seconds...");
-//!     handle.add_task(MyTask::new('🆕'));
+//!     let h = handle.clone();
+//!     tokio::spawn(async move {
+//!         // Add a new task after 5 seconds
+//!         tokio::time::sleep(Duration::from_secs(5)).await;
+//!         println!("Adding a task after 5 seconds...");
+//!         h.add_task("task".into(), MyTask { emoji: '🆕' }).unwrap();
+//!
+//!         // Restart the task after 5 seconds
+//!         tokio::time::sleep(Duration::from_secs(5)).await;
+//!         println!("Restarting task after 5 seconds...");
+//!         h.restart("task".into()).unwrap();
+//!
+//!         // Kill the task after another 5 seconds
+//!         tokio::time::sleep(Duration::from_secs(5)).await;
+//!         println!("Killing task after 5 seconds...");
+//!         h.kill_task("task".into()).unwrap();
+//!     });
 //!
 //!     // Wait for all tasks to die
-//!     handle.wait().await;
+//!     let _ = handle.wait().await;
 //!     println!("All tasks died! 🫡");
 //! }
 //! ```
 //!
 pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
-pub use task::{SupervisedTask, TaskStatus};
+pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 
-mod messaging;
 mod supervisor;
 mod task;
-mod task_group;
+
+pub type TaskName = String;
