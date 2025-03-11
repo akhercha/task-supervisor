@@ -25,7 +25,6 @@ impl SupervisedTask for MyTask {
             println!("{} Task is running!", self.emoji);
             i += 1;
             if i == 5 {
-                println!("{} Task is failing after 5 iterations...", self.emoji);
                 bail!("Task failed after 5 iterations");
             }
         }
@@ -36,10 +35,10 @@ impl SupervisedTask for MyTask {
 async fn main() {
     // Build the supervisor with initial tasks
     let supervisor = SupervisorBuilder::default()
-        .with_task(MyTask::new('🥴'))
-        .with_task(MyTask::new('🧑'))
-        .with_task(MyTask::new('😸'))
-        .with_task(MyTask::new('👽'))
+        .with_task("one".into(), MyTask::new('🥴'))
+        .with_task("two".into(), MyTask::new('🧑'))
+        .with_task("three".into(), MyTask::new('😸'))
+        .with_task("four".into(), MyTask::new('👽'))
         .build();
 
     // Run the supervisor and get the handle
@@ -48,9 +47,9 @@ async fn main() {
     // Spawn a task to add a new task after 5 seconds
     tokio::time::sleep(Duration::from_secs(5)).await;
     println!("Adding a new task after 5 seconds...");
-    handle.add_task(MyTask::new('🆕'));
+    let _ = handle.add_task("five".into(), MyTask::new('🆕'));
 
     // Wait for all tasks to die
-    handle.wait().await;
+    let _ = handle.wait().await;
     println!("All tasks died! 🫡");
 }

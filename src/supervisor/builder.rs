@@ -1,15 +1,14 @@
 use std::{collections::HashMap, time::Duration};
 
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
-use crate::{supervisor::TaskId, task::TaskHandle, SupervisedTask, Supervisor};
+use crate::{task::TaskHandle, SupervisedTask, Supervisor, TaskName};
 
 // TODO: We should be able to configure:
 // * max_restarts,
 // * base_restart_delay,
 pub struct SupervisorBuilder<T: SupervisedTask> {
-    tasks: HashMap<TaskId, TaskHandle<T>>,
+    tasks: HashMap<TaskName, TaskHandle<T>>,
 }
 
 impl<T: SupervisedTask> SupervisorBuilder<T> {
@@ -19,17 +18,17 @@ impl<T: SupervisedTask> SupervisorBuilder<T> {
         }
     }
 
-    pub fn with_task(mut self, task: T) -> Self {
-        self.tasks.insert(Uuid::new_v4(), TaskHandle::new(task));
+    pub fn with_task(mut self, name: String, task: T) -> Self {
+        self.tasks.insert(name, TaskHandle::new(task));
         self
     }
 
     pub fn with_tasks<I>(mut self, tasks: I) -> Self
     where
-        I: IntoIterator<Item = T>,
+        I: IntoIterator<Item = (TaskName, T)>,
     {
-        for task in tasks {
-            self = self.with_task(task);
+        for (task_name, task) in tasks {
+            self = self.with_task(task_name, task);
         }
         self
     }

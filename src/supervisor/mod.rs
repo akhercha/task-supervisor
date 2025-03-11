@@ -8,26 +8,25 @@ use std::{
 
 use handle::SupervisorMessage;
 use tokio::{sync::mpsc, time::interval_at};
-use uuid::Uuid;
 
 use crate::{
     supervisor::handle::SupervisorHandle,
     task::{SupervisedTask, TaskHandle, TaskStatus},
     utils::TaskGroup,
-    TaskId,
+    TaskName,
 };
 
 /// A beat sent from a task to indicate that it's alive.
 #[derive(Debug, Clone)]
 pub(crate) struct Heartbeat {
-    pub(crate) task_id: TaskId,
+    pub(crate) task_name: TaskName,
     pub(crate) timestamp: Instant,
 }
 
 impl Heartbeat {
-    pub fn new(task_id: TaskId) -> Self {
+    pub fn new(task_name: &TaskName) -> Self {
         Self {
-            task_id,
+            task_name: task_name.to_string(),
             timestamp: Instant::now(),
         }
     }
@@ -40,7 +39,7 @@ pub(crate) enum SupervisedTaskMessage {
     /// Sent by tasks to indicate they are alive
     Heartbeat(Heartbeat),
     /// Sent by the supervisor to itself to trigger a task restart
-    Restart(TaskId),
+    Restart(TaskName),
 }
 
 /// Main component that handles all the tasks.
@@ -49,7 +48,7 @@ pub(crate) enum SupervisedTaskMessage {
 /// responsible of proving that the main thread is alive.
 /// If one threads stops, the other stops too.
 pub struct Supervisor<T: SupervisedTask> {
-    pub(crate) tasks: HashMap<TaskId, TaskHandle<T>>,
+    pub(crate) tasks: HashMap<TaskName, TaskHandle<T>>,
     pub(crate) timeout_treshold: Duration,
     pub(crate) external_tx: mpsc::UnboundedSender<SupervisorMessage<T>>,
     pub(crate) external_rx: mpsc::UnboundedReceiver<SupervisorMessage<T>>,
@@ -83,8 +82,8 @@ where
     }
 
     async fn start_all_tasks(&mut self) {
-        for (task_id, task_handle) in self.tasks.iter_mut() {
-            Self::start_task(*task_id, task_handle, self.tx.clone()).await;
+        for (task_name, task_handle) in self.tasks.iter_mut() {
+            Self::start_task(task_name.to_string(), task_handle, self.tx.clone()).await;
         }
     }
 
@@ -102,8 +101,8 @@ where
                         SupervisedTaskMessage::Heartbeat(heartbeat) => {
                             self.register_heartbeat(heartbeat);
                         },
-                        SupervisedTaskMessage::Restart(task_id) => {
-                            self.restart_task(task_id).await;
+                        SupervisedTaskMessage::Restart(task_name) => {
+                            self.restart_task(task_name).await;
                         }
                     }
                 },
@@ -111,11 +110,10 @@ where
                 // Handle user messages through Supervisor handle
                 Some(user_msg) = self.external_rx.recv() => {
                     match user_msg {
-                        SupervisorMessage::AddTask(task) => {
-                            let task_id = Uuid::new_v4();
+                        SupervisorMessage::AddTask(task_name, task) => {
                             let mut task_handle = TaskHandle::new(task);
-                            Self::start_task(task_id, &mut task_handle, self.tx.clone()).await;
-                            self.tasks.insert(task_id, task_handle);
+                            Self::start_task(task_name.clone(), &mut task_handle, self.tx.clone()).await;
+                            self.tasks.insert(task_name, task_handle);
                         }
                         _ => todo!("Not implemented yet!")
                     }
@@ -133,18 +131,19 @@ where
     }
 
     async fn start_task(
-        task_id: TaskId,
+        task_name: TaskName,
         task_handle: &mut TaskHandle<T>,
         tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
     ) {
         let mut task = task_handle.task.clone();
+        let task_name_c = task_name.clone();
         let handle = tokio::spawn(async move {
             let ran_task = tokio::spawn(async move { task.run_forever().await });
             let heartbeat_task = tokio::spawn(async move {
                 let mut beat_interval = tokio::time::interval(Duration::from_millis(500));
                 loop {
                     beat_interval.tick().await;
-                    let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(task_id));
+                    let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(&task_name_c));
                     if tx.send(beat).is_err() {
                         break;
                     }
@@ -165,7 +164,7 @@ where
     }
 
     fn register_heartbeat(&mut self, heartbeat: Heartbeat) {
-        let Some(task_handle) = self.tasks.get_mut(&heartbeat.task_id) else {
+        let Some(task_handle) = self.tasks.get_mut(&heartbeat.task_name) else {
             return;
         };
         if task_handle.status == TaskStatus::Dead {
@@ -191,12 +190,12 @@ where
         }
     }
 
-    async fn restart_task(&mut self, task_id: TaskId) {
-        let Some(task_handle) = self.tasks.get_mut(&task_id) else {
+    async fn restart_task(&mut self, task_name: TaskName) {
+        let Some(task_handle) = self.tasks.get_mut(&task_name) else {
             return;
         };
         task_handle.clean_before_restart();
-        Self::start_task(task_id, task_handle, self.tx.clone()).await;
+        Self::start_task(task_name, task_handle, self.tx.clone()).await;
     }
 
     fn check_all_health(&mut self) {
@@ -204,8 +203,9 @@ where
             .tasks
             .iter()
             .filter(|(_, handle)| handle.has_crashed(self.timeout_treshold))
-            .map(|(id, _)| *id)
+            .map(|(name, _)| name.clone())
             .collect::<Vec<_>>();
+
         for crashed_task in crashed_tasks {
             let Some(task_handle) = self.tasks.get_mut(&crashed_task) else {
                 return;

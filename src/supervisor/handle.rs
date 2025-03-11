@@ -5,11 +5,9 @@ use tokio::{
 
 use crate::{SupervisedTask, TaskName};
 
-type SendResult<T> = Result<(), mpsc::error::SendError<SupervisorMessage<T>>>;
-
 #[derive(Debug, Clone)]
 pub enum SupervisorMessage<T: SupervisedTask> {
-    AddTask(T),
+    AddTask(TaskName, T),
     RestartTask(TaskName),
     KillTask(TaskName),
     Shutdown,
@@ -22,6 +20,8 @@ pub struct SupervisorHandle<T: SupervisedTask> {
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage<T>>,
 }
 
+type SendResult<T> = Result<(), mpsc::error::SendError<SupervisorMessage<T>>>;
+
 impl<T: SupervisedTask> SupervisorHandle<T> {
     /// Waits for the supervisor to complete (i.e., when all tasks completed/ are dead).
     pub async fn wait(self) -> Result<(), JoinError> {
@@ -29,8 +29,8 @@ impl<T: SupervisedTask> SupervisorHandle<T> {
     }
 
     /// Adds a new task to the running supervisor.
-    pub fn add_task(&self, task: T) -> SendResult<T> {
-        self.tx.send(SupervisorMessage::AddTask(task))
+    pub fn add_task(&self, task_name: TaskName, task: T) -> SendResult<T> {
+        self.tx.send(SupervisorMessage::AddTask(task_name, task))
     }
 
     /// Restart a running task.

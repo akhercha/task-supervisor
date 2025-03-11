@@ -93,5 +93,4 @@ mod supervisor;
 mod task;
 mod utils;
 
-pub type TaskId = uuid::Uuid;
 pub type TaskName = String;
