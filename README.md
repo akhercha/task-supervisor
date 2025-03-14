@@ -112,7 +112,7 @@ async fn main() -> Result<(), SupervisorHandleError> {
 
     // Wait for the Supervisor to be stopped
     handle.wait().await?;
-    println!("All tasks died! 🫡");
+    println!("Supervisor stopped! 🫡");
     Ok(())
 }
 ```
