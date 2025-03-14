@@ -7,7 +7,7 @@ use tokio::time::{advance, pause};
 
 use task_supervisor::{SupervisorBuilder, SupervisorHandle, TaskStatus};
 
-use common::{FailingTask, HealthyTask, NoHeartbeatTask};
+use common::{FailingTask, HealthyTask};
 
 fn supervisor_handle() -> SupervisorHandle {
     SupervisorBuilder::new()
@@ -48,7 +48,7 @@ async fn test_no_heartbeat_task_gets_restarted() {
     let handle = supervisor_handle();
 
     let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let task = NoHeartbeatTask {
+    let task = HealthyTask {
         run_flag: run_flag.clone(),
     };
 
@@ -84,7 +84,7 @@ async fn test_multiple_tasks() {
         .unwrap();
 
     let no_heartbeat_run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let no_heartbeat_task = NoHeartbeatTask {
+    let no_heartbeat_task = HealthyTask {
         run_flag: no_heartbeat_run_flag.clone(),
     };
     handle

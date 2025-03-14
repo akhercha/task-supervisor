@@ -74,11 +74,11 @@
 //!         // Add a new task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Adding a task after 5 seconds...");
-//!         h.add_task("task".into(), MyTask { emoji: '🆕' })?;
+//!         h.add_task("task", MyTask { emoji: '🆕' })?;
 //!
 //!         // Query the task status after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
-//!         match h.get_task_status("task".into()).await {
+//!         match h.get_task_status("task").await {
 //!             Ok(Some(status)) => println!("Task status: {:?}", status),
 //!             Ok(None) => println!("Task not found"),
 //!             Err(e) => println!("Error getting task status: {}", e),
@@ -87,7 +87,7 @@
 //!         // Restart the task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Restarting task after 5 seconds...");
-//!         h.restart("task".into())?;
+//!         h.restart("task")?;
 //!
 //!         // Query all task statuses after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -104,7 +104,7 @@
 //!         // Kill the task after another 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Killing task after 5 seconds...");
-//!         h.kill_task("task".into())?;
+//!         h.kill_task("task")?;
 //!     });
 //!
 //!     // Wait for all tasks to die
