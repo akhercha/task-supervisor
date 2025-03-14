@@ -3,7 +3,7 @@ mod common;
 use std::sync::Arc;
 use std::{sync::atomic::Ordering, time::Duration};
 
-use tokio::time::{advance, pause};
+use tokio::time::pause;
 
 use task_supervisor::{SupervisorBuilder, SupervisorHandle, TaskStatus};
 
@@ -14,7 +14,7 @@ fn supervisor_handle() -> SupervisorHandle {
         .with_timeout_threshold(Duration::from_millis(200))
         .with_heartbeat_interval(Duration::from_millis(50))
         .with_health_check_initial_delay(Duration::from_millis(100))
-        .with_health_check_interval(Duration::from_millis(100))
+        .with_health_check_interval(Duration::from_millis(50))
         .with_max_restart_attempts(3)
         .with_base_restart_delay(Duration::from_millis(100))
         .build()
@@ -32,12 +32,12 @@ async fn test_healthy_task_remains_healthy() {
     };
     handle.add_task("task", task).unwrap();
 
-    advance(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     let status = handle.get_task_status("task").await.unwrap().unwrap();
     assert_eq!(status, TaskStatus::Healthy);
 
     run_flag.store(false, Ordering::SeqCst);
-    advance(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let status = handle.get_task_status("task").await.unwrap().unwrap();
     assert_eq!(status, TaskStatus::Completed);
 }
@@ -53,13 +53,13 @@ async fn test_no_heartbeat_task_gets_restarted() {
     };
 
     handle.add_task("task", task).unwrap();
-    advance(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let status = handle.get_task_status("task").await.unwrap().unwrap();
-    assert_eq!(status, TaskStatus::Healthy); // Restarted and running
+    assert_eq!(status, TaskStatus::Healthy);
 
     run_flag.store(false, Ordering::SeqCst);
-    advance(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let status = handle.get_task_status("task").await.unwrap().unwrap();
     assert_eq!(status, TaskStatus::Completed);
@@ -91,7 +91,7 @@ async fn test_multiple_tasks() {
         .add_task("no_heartbeat_task", no_heartbeat_task)
         .unwrap();
 
-    advance(std::time::Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     let healthy_status = handle
         .get_task_status("healthy_task")
@@ -116,7 +116,7 @@ async fn test_multiple_tasks() {
 
     healthy_run_flag.store(false, Ordering::SeqCst);
     no_heartbeat_run_flag.store(false, Ordering::SeqCst);
-    advance(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let healthy_status = handle
         .get_task_status("healthy_task")

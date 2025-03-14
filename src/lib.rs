@@ -74,7 +74,7 @@
 //!         // Add a new task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Adding a task after 5 seconds...");
-//!         h.add_task("task", MyTask { emoji: '🆕' })?;
+//!         h.add_task("task", MyTask { emoji: '🆕' }).unwrap();
 //!
 //!         // Query the task status after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -87,7 +87,7 @@
 //!         // Restart the task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Restarting task after 5 seconds...");
-//!         h.restart("task")?;
+//!         h.restart("task").unwrap();
 //!
 //!         // Query all task statuses after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -104,11 +104,14 @@
 //!         // Kill the task after another 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Killing task after 5 seconds...");
-//!         h.kill_task("task")?;
+//!         h.kill_task("task").unwrap();
+//!
+//!         // Shutdown the supervisor
+//!         h.shutdown().unwrap();
 //!     });
 //!
 //!     // Wait for all tasks to die
-//!     handle.wait().await?;
+//!     handle.wait().await.unwrap();
 //!     println!("All tasks died! 🫡");
 //!     Ok(())
 //! }

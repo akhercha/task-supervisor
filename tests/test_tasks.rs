@@ -1,8 +1,8 @@
 mod common;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use task_supervisor::{SupervisorBuilder, TaskStatus};
-use tokio::time::{advance, pause};
+use tokio::time::pause;
 
 use common::{CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateFailTask};
 
@@ -19,7 +19,7 @@ async fn test_task_completes_successfully() {
     };
     handle.add_task("completing_task", task.clone()).unwrap();
 
-    advance(std::time::Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     let status = handle
         .get_task_status("completing_task")
         .await
@@ -44,7 +44,7 @@ async fn test_task_fails_and_restarts() {
     };
     handle.add_task("failing_task", task.clone()).unwrap();
 
-    advance(std::time::Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     let status = handle
         .get_task_status("failing_task")
         .await
@@ -64,7 +64,7 @@ async fn test_immediate_complete_task() {
     let task = ImmediateCompleteTask;
     handle.add_task("immediate_complete", task).unwrap();
 
-    advance(std::time::Duration::from_millis(10)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
     let status = handle
         .get_task_status("immediate_complete")
         .await
@@ -85,7 +85,7 @@ async fn test_immediate_fail_task() {
     let task = ImmediateFailTask;
     handle.add_task("immediate_fail", task).unwrap();
 
-    advance(std::time::Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     let status = handle
         .get_task_status("immediate_fail")
         .await

@@ -84,6 +84,15 @@ pub enum TaskOutcome {
     Failed(String),
 }
 
+impl std::fmt::Display for TaskOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed => write!(f, "completed"),
+            Self::Failed(e) => write!(f, "failed: {e}"),
+        }
+    }
+}
+
 pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
     pub(crate) task: DynTask,
@@ -97,15 +106,15 @@ pub(crate) struct TaskHandle {
 }
 
 impl TaskHandle {
-    /// Creates a new `TaskHandle` with custom restart configuration.
-    pub(crate) fn new_with_config<T: CloneableSupervisedTask + 'static>(
-        task: T,
+    /// Creates a `TaskHandle` from a boxed task with default configuration.
+    pub(crate) fn new(
+        task: Box<dyn CloneableSupervisedTask>,
         max_restart_attempts: u32,
         base_restart_delay: Duration,
     ) -> Self {
         Self {
             status: TaskStatus::Created,
-            task: Box::new(task),
+            task,
             handles: None,
             last_heartbeat: None,
             restart_attempts: 0,
@@ -116,21 +125,14 @@ impl TaskHandle {
         }
     }
 
-    /// Creates a `TaskHandle` from a boxed task with default configuration.
-    pub(crate) fn from_dyn_task(task: Box<dyn CloneableSupervisedTask>) -> Self {
-        const MAX_RESTART_ATTEMPS: u32 = 5;
-        const BASE_RESTART_DELAY: Duration = Duration::from_secs(3);
-        Self {
-            status: TaskStatus::Created,
-            task,
-            handles: None,
-            last_heartbeat: None,
-            restart_attempts: 0,
-            healthy_since: None,
-            cancellation_token: None,
-            max_restart_attempts: MAX_RESTART_ATTEMPS,
-            base_restart_delay: BASE_RESTART_DELAY,
-        }
+    /// Creates a new `TaskHandle` with custom restart configuration.
+    pub(crate) fn from_task<T: CloneableSupervisedTask + 'static>(
+        task: T,
+        max_restart_attempts: u32,
+        base_restart_delay: Duration,
+    ) -> Self {
+        let task = Box::new(task);
+        Self::new(task, max_restart_attempts, base_restart_delay)
     }
 
     /// Updates the last heartbeat time.
@@ -155,10 +157,6 @@ impl TaskHandle {
     /// Calculates the restart delay using exponential backoff.
     pub(crate) fn restart_delay(&self) -> Duration {
         let factor = 2u32.saturating_pow(self.restart_attempts.min(5));
-        println!(
-            "Restarting in {:?}",
-            self.base_restart_delay.saturating_mul(factor)
-        );
         self.base_restart_delay.saturating_mul(factor)
     }
 

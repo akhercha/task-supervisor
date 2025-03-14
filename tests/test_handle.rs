@@ -31,7 +31,7 @@ async fn test_add_task_dynamically() {
     };
     handle.add_task("task", task.clone()).unwrap();
 
-    advance(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     let status = handle.get_task_status("task").await.unwrap().unwrap();
     assert_eq!(status, TaskStatus::Completed);
     assert_eq!(task.run_count.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -47,10 +47,10 @@ async fn test_restart_task() {
     };
 
     handle.add_task("task", task.clone()).unwrap();
-    advance(Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     handle.restart("task").unwrap();
-    advance(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let status = handle.get_task_status("task").await.unwrap().unwrap();
     assert_eq!(status, TaskStatus::Completed);
