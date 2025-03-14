@@ -105,10 +105,12 @@ async fn main() -> Result<(), SupervisorHandleError> {
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Killing task after 5 seconds...");
         h.kill_task("task")?;
+
+        h.shutdown().unwrap();
         Ok(())
     })?;
 
-    // Wait for all tasks to die
+    // Wait for the Supervisor to be stopped
     handle.wait().await?;
     println!("All tasks died! 🫡");
     Ok(())
