@@ -1,6 +1,6 @@
 [package]
 name = "task-supervisor"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.81"
 categories = ["asynchronous"]
@@ -11,7 +11,7 @@ repository = "https://github.com/akhercha/task-supervisor"
 license = "MIT"
 
 [dependencies]
-tokio = { version = "^1.43.0", features = ["full"] }
+tokio = { version = "^1.43.0", features = ["full", "test-util"] }
 tokio-util = "0.7.13"
 async-trait = "0.1.87"
 futures = "0.3.31"

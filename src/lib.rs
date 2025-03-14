@@ -1,9 +1,9 @@
 //! # Task Supervisor for Tokio
 //!
-//! The `task-supervisor` crate provides a lightweight framework for managing and monitoring asynchronous tasks
-//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health via heartbeats
+//! The `task-supervisor` crate provides a framework for managing and monitoring asynchronous tasks
+//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health
 //! and automatically restarting them if they fail or become unresponsive. The supervisor also supports dynamic
-//! task management, allowing tasks to be added, restarted, or killed at runtime, as well as querying the status of tasks.
+//! task management, allowing tasks to be added, restarted, or killed at runtime.
 //!
 //! ## Key Features
 //!
@@ -43,6 +43,7 @@
 //! use std::time::Duration;
 //! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome, SupervisorHandleError};
 //!
+//! // A task need to be Clonable for now - so we can restart it easily.
 //! #[derive(Clone)]
 //! struct MyTask {
 //!     pub emoji: char,
@@ -57,10 +58,6 @@
 //!         }
 //!         println!("{} Task completed!", self.emoji);
 //!         Ok(TaskOutcome::Completed)
-//!     }
-//!
-//!     fn clone_task(&self) -> Box<dyn SupervisedTask> {
-//!         Box::new(self.clone())
 //!     }
 //! }
 //!
@@ -77,11 +74,11 @@
 //!         // Add a new task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Adding a task after 5 seconds...");
-//!         h.add_task("task".into(), MyTask { emoji: '🆕' })?;
+//!         h.add_task("task", MyTask { emoji: '🆕' }).unwrap();
 //!
 //!         // Query the task status after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
-//!         match h.get_task_status("task".into()).await {
+//!         match h.get_task_status("task").await {
 //!             Ok(Some(status)) => println!("Task status: {:?}", status),
 //!             Ok(None) => println!("Task not found"),
 //!             Err(e) => println!("Error getting task status: {}", e),
@@ -90,7 +87,7 @@
 //!         // Restart the task after 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Restarting task after 5 seconds...");
-//!         h.restart("task".into())?;
+//!         h.restart("task").unwrap();
 //!
 //!         // Query all task statuses after 2 seconds
 //!         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -107,17 +104,24 @@
 //!         // Kill the task after another 5 seconds
 //!         tokio::time::sleep(Duration::from_secs(5)).await;
 //!         println!("Killing task after 5 seconds...");
-//!         h.kill_task("task".into())?;
+//!         h.kill_task("task").unwrap();
+//!
+//!         // Shutdown the supervisor
+//!         h.shutdown().unwrap();
 //!     });
 //!
 //!     // Wait for all tasks to die
-//!     handle.wait().await?;
+//!     handle.wait().await.unwrap();
 //!     println!("All tasks died! 🫡");
 //!     Ok(())
 //! }
 //! ```
 //!
-pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
+pub use supervisor::{
+    builder::SupervisorBuilder,
+    handle::{SupervisorHandle, SupervisorHandleError},
+    Supervisor,
+};
 pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 
 mod supervisor;

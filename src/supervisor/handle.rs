@@ -6,7 +6,10 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 
-use crate::{task::DynTask, SupervisedTask, TaskName, TaskStatus};
+use crate::{
+    task::{CloneableSupervisedTask, DynTask},
+    TaskName, TaskStatus,
+};
 
 #[derive(Debug, Error)]
 pub enum SupervisorHandleError {
@@ -94,13 +97,13 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn add_task<T: SupervisedTask + 'static>(
+    pub fn add_task<T: CloneableSupervisedTask + 'static>(
         &self,
-        task_name: TaskName,
+        task_name: &str,
         task: T,
     ) -> Result<(), SupervisorHandleError> {
         self.tx
-            .send(SupervisorMessage::AddTask(task_name, Box::new(task)))
+            .send(SupervisorMessage::AddTask(task_name.into(), Box::new(task)))
             .map_err(SupervisorHandleError::SendError)
     }
 
@@ -114,9 +117,9 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn restart(&self, task_name: TaskName) -> Result<(), SupervisorHandleError> {
+    pub fn restart(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
         self.tx
-            .send(SupervisorMessage::RestartTask(task_name))
+            .send(SupervisorMessage::RestartTask(task_name.into()))
             .map_err(SupervisorHandleError::SendError)
     }
 
@@ -130,9 +133,9 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn kill_task(&self, task_name: TaskName) -> Result<(), SupervisorHandleError> {
+    pub fn kill_task(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
         self.tx
-            .send(SupervisorMessage::KillTask(task_name))
+            .send(SupervisorMessage::KillTask(task_name.into()))
             .map_err(SupervisorHandleError::SendError)
     }
 
@@ -163,11 +166,11 @@ impl SupervisorHandle {
     /// - `Err(RecvError)` if communication with the supervisor fails (e.g., it has shut down).
     pub async fn get_task_status(
         &self,
-        task_name: TaskName,
+        task_name: &str,
     ) -> Result<Option<TaskStatus>, SupervisorHandleError> {
         let (sender, receiver) = oneshot::channel();
         self.tx
-            .send(SupervisorMessage::GetTaskStatus(task_name, sender))
+            .send(SupervisorMessage::GetTaskStatus(task_name.into(), sender))
             .map_err(SupervisorHandleError::SendError)?;
         receiver.await.map_err(SupervisorHandleError::RecvError)
     }
