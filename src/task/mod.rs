@@ -1,17 +1,30 @@
-use std::time::{Duration, Instant};
+use std::{
+    error::Error,
+    time::{Duration, Instant},
+};
 
 use tokio_util::sync::CancellationToken;
 
-pub type DynTask = Box<dyn SupervisedTask>;
-pub type TaskError = Box<dyn std::error::Error + Send + Sync>;
+pub type DynTask = Box<dyn CloneableSupervisedTask>;
+pub type TaskError = Box<dyn Error + Send + Sync>;
 
 #[async_trait::async_trait]
 pub trait SupervisedTask: Send + 'static {
     /// Runs the task until completion or failure.
     async fn run(&mut self) -> Result<TaskOutcome, TaskError>;
+}
 
-    /// Clones the task into a boxed trait object.
-    fn clone_task(&self) -> Box<dyn SupervisedTask>;
+pub trait CloneableSupervisedTask: SupervisedTask {
+    fn clone_box(&self) -> Box<dyn CloneableSupervisedTask>;
+}
+
+impl<T> CloneableSupervisedTask for T
+where
+    T: SupervisedTask + Clone + Send + 'static,
+{
+    fn clone_box(&self) -> Box<dyn CloneableSupervisedTask> {
+        Box::new(self.clone())
+    }
 }
 
 /// Represents the current state of a supervised task.
@@ -29,6 +42,37 @@ pub enum TaskStatus {
     Completed,
     /// Task has failed too many times and is terminated.
     Dead,
+}
+
+impl TaskStatus {
+    pub fn is_restarting(&self) -> bool {
+        matches!(self, TaskStatus::Failed)
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        matches!(self, TaskStatus::Healthy)
+    }
+
+    pub fn is_dead(&self) -> bool {
+        matches!(self, TaskStatus::Dead)
+    }
+
+    pub fn has_completed(&self) -> bool {
+        matches!(self, TaskStatus::Completed)
+    }
+}
+
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Created => write!(f, "created"),
+            Self::Starting => write!(f, "starting"),
+            Self::Healthy => write!(f, "healthy"),
+            Self::Failed => write!(f, "failed"),
+            Self::Completed => write!(f, "completed"),
+            Self::Dead => write!(f, "dead"),
+        }
+    }
 }
 
 /// Outcome of a task's execution.
@@ -54,7 +98,7 @@ pub(crate) struct TaskHandle {
 
 impl TaskHandle {
     /// Creates a new `TaskHandle` with custom restart configuration.
-    pub(crate) fn new_with_config<T: SupervisedTask + 'static>(
+    pub(crate) fn new_with_config<T: CloneableSupervisedTask + 'static>(
         task: T,
         max_restart_attempts: u32,
         base_restart_delay: Duration,
@@ -73,7 +117,7 @@ impl TaskHandle {
     }
 
     /// Creates a `TaskHandle` from a boxed task with default configuration.
-    pub(crate) fn from_dyn_task(task: Box<dyn SupervisedTask>) -> Self {
+    pub(crate) fn from_dyn_task(task: Box<dyn CloneableSupervisedTask>) -> Self {
         const MAX_RESTART_ATTEMPS: u32 = 5;
         const BASE_RESTART_DELAY: Duration = Duration::from_secs(3);
         Self {
@@ -111,6 +155,10 @@ impl TaskHandle {
     /// Calculates the restart delay using exponential backoff.
     pub(crate) fn restart_delay(&self) -> Duration {
         let factor = 2u32.saturating_pow(self.restart_attempts.min(5));
+        println!(
+            "Restarting in {:?}",
+            self.base_restart_delay.saturating_mul(factor)
+        );
         self.base_restart_delay.saturating_mul(factor)
     }
 

@@ -1,9 +1,9 @@
 //! # Task Supervisor for Tokio
 //!
-//! The `task-supervisor` crate provides a lightweight framework for managing and monitoring asynchronous tasks
-//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health via heartbeats
+//! The `task-supervisor` crate provides a framework for managing and monitoring asynchronous tasks
+//! in Rust using the Tokio runtime. It ensures tasks remain operational by monitoring their health
 //! and automatically restarting them if they fail or become unresponsive. The supervisor also supports dynamic
-//! task management, allowing tasks to be added, restarted, or killed at runtime, as well as querying the status of tasks.
+//! task management, allowing tasks to be added, restarted, or killed at runtime.
 //!
 //! ## Key Features
 //!
@@ -43,6 +43,7 @@
 //! use std::time::Duration;
 //! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome, SupervisorHandleError};
 //!
+//! // A task need to be Clonable for now - so we can restart it easily.
 //! #[derive(Clone)]
 //! struct MyTask {
 //!     pub emoji: char,
@@ -57,10 +58,6 @@
 //!         }
 //!         println!("{} Task completed!", self.emoji);
 //!         Ok(TaskOutcome::Completed)
-//!     }
-//!
-//!     fn clone_task(&self) -> Box<dyn SupervisedTask> {
-//!         Box::new(self.clone())
 //!     }
 //! }
 //!
@@ -117,7 +114,11 @@
 //! }
 //! ```
 //!
-pub use supervisor::{builder::SupervisorBuilder, handle::SupervisorHandle, Supervisor};
+pub use supervisor::{
+    builder::SupervisorBuilder,
+    handle::{SupervisorHandle, SupervisorHandleError},
+    Supervisor,
+};
 pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 
 mod supervisor;

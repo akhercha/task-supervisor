@@ -2,14 +2,17 @@ use std::{collections::HashMap, time::Duration};
 
 use tokio::sync::mpsc;
 
-use crate::{task::TaskHandle, SupervisedTask, Supervisor, TaskName};
+use crate::{
+    task::{CloneableSupervisedTask, TaskHandle},
+    Supervisor,
+};
 
 /// Builds a `Supervisor` instance with configurable parameters.
 ///
 /// Allows customization of task timeout, heartbeat interval, health check timing,
 /// and per-task restart settings.
 pub struct SupervisorBuilder {
-    tasks: HashMap<TaskName, TaskHandle>,
+    tasks: HashMap<String, TaskHandle>,
     timeout_threshold: Duration,
     heartbeat_interval: Duration,
     health_check_initial_delay: Duration,
@@ -33,10 +36,10 @@ impl SupervisorBuilder {
     }
 
     /// Adds a task to the supervisor with the specified name.
-    pub fn with_task(mut self, name: String, task: impl SupervisedTask) -> Self {
+    pub fn with_task(mut self, name: &str, task: impl CloneableSupervisedTask) -> Self {
         let task_handle =
             TaskHandle::new_with_config(task, self.max_restart_attempts, self.base_restart_delay);
-        self.tasks.insert(name, task_handle);
+        self.tasks.insert(name.into(), task_handle);
         self
     }
 
@@ -78,7 +81,7 @@ impl SupervisorBuilder {
 
     /// Constructs the `Supervisor` with the configured settings.
     pub fn build(self) -> Supervisor {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (internal_tx, internal_rx) = mpsc::unbounded_channel();
         let (user_tx, user_rx) = mpsc::unbounded_channel();
         Supervisor {
             tasks: self.tasks,
@@ -86,8 +89,8 @@ impl SupervisorBuilder {
             heartbeat_interval: self.heartbeat_interval,
             health_check_initial_delay: self.health_check_initial_delay,
             health_check_interval: self.health_check_interval,
-            tx,
-            rx,
+            internal_tx,
+            internal_rx,
             external_tx: user_tx,
             external_rx: user_rx,
         }

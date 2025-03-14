@@ -13,7 +13,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-task-supervisor = "0.1.5"  # Replace with the latest version
+task-supervisor = "0.1.6"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
@@ -22,7 +22,7 @@ async-trait = "0.1"
 
 ### 1. Defining a Supervised Task
 
-Tasks must implement the `SupervisedTask` trait, which requires implementing the `run` method and the `clone_task` method. The run method defines the task's logic and returns a `TaskOutcome` to indicate completion or failure, while `clone_task` enables task restarting:
+Tasks must implement the `SupervisedTask` trait, which requires implementing the `run` method. It defines the task's logic and returns a `TaskOutcome` to indicate completion or failure:
 
 ```rust
 use async_trait::async_trait;
@@ -43,10 +43,6 @@ impl SupervisedTask for MyTask {
         }
         println!("{} Task completed!", self.emoji);
         Ok(TaskOutcome::Completed)
-    }
-
-    fn clone_task(&self) -> Box<dyn SupervisedTask> {
-        Box::new(self.clone())
     }
 }
 ```

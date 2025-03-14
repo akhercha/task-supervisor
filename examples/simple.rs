@@ -19,10 +19,6 @@ impl SupervisedTask for MyTask {
         println!("{} Task completed!", self.emoji);
         Ok(TaskOutcome::Completed)
     }
-
-    fn clone_task(&self) -> Box<dyn SupervisedTask> {
-        Box::new(self.clone())
-    }
 }
 
 #[tokio::main]
@@ -41,12 +37,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Add a new task after 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Adding a task after 5 seconds...");
-        h.add_task("task1".into(), MyTask { emoji: '🆕' })
+        h.add_task("task1", MyTask { emoji: '🆕' })
             .expect("Failed to add task");
 
         // Check the status of the task after 2 seconds
         tokio::time::sleep(Duration::from_secs(2)).await;
-        match h.get_task_status("task1".into()).await {
+        match h.get_task_status("task1").await {
             Ok(Some(status)) => println!("Task 'task1' status: {:?}", status),
             Ok(None) => println!("Task 'task1' not found"),
             Err(e) => println!("Error getting task status: {}", e),
@@ -55,7 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Restart the task after 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Restarting task after 5 seconds...");
-        h.restart("task1".into()).expect("Failed to restart task");
+        h.restart("task1").expect("Failed to restart task");
 
         // Check all task statuses after 2 seconds
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -72,11 +68,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Kill the task after 5 seconds
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("Killing task after 5 seconds...");
-        h.kill_task("task1".into()).expect("Failed to kill task");
+        h.kill_task("task1").expect("Failed to kill task");
 
         // Check the status again after killing
         tokio::time::sleep(Duration::from_secs(2)).await;
-        match h.get_task_status("task1".into()).await {
+        match h.get_task_status("task1").await {
             Ok(Some(status)) => println!("Task 'task1' status after kill: {:?}", status),
             Ok(None) => println!("Task 'task1' not found after kill"),
             Err(e) => println!("Error getting task status after kill: {}", e),
