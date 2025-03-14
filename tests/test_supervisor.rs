@@ -1,18 +1,31 @@
 mod common;
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::{sync::atomic::Ordering, time::Duration};
 
 use tokio::time::{advance, pause};
 
-use task_supervisor::TaskStatus;
+use task_supervisor::{SupervisorBuilder, SupervisorHandle, TaskStatus};
 
-use common::{create_supervisor_and_get_handle, FailingTask, HealthyTask, NoHeartbeatTask};
+use common::{FailingTask, HealthyTask, NoHeartbeatTask};
+
+fn supervisor_handle() -> SupervisorHandle {
+    SupervisorBuilder::new()
+        .with_timeout_threshold(Duration::from_millis(200))
+        .with_heartbeat_interval(Duration::from_millis(50))
+        .with_health_check_initial_delay(Duration::from_millis(100))
+        .with_health_check_interval(Duration::from_millis(100))
+        .with_max_restart_attempts(3)
+        .with_base_restart_delay(Duration::from_millis(100))
+        .build()
+        .run()
+}
 
 #[tokio::test]
 async fn test_healthy_task_remains_healthy() {
     pause();
-    let handle = create_supervisor_and_get_handle().await;
+    let handle = supervisor_handle();
+
     let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let task = HealthyTask {
         run_flag: run_flag.clone(),
@@ -32,7 +45,8 @@ async fn test_healthy_task_remains_healthy() {
 #[tokio::test]
 async fn test_no_heartbeat_task_gets_restarted() {
     pause();
-    let handle = create_supervisor_and_get_handle().await;
+    let handle = supervisor_handle();
+
     let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let task = NoHeartbeatTask {
         run_flag: run_flag.clone(),
@@ -54,7 +68,7 @@ async fn test_no_heartbeat_task_gets_restarted() {
 #[tokio::test]
 async fn test_multiple_tasks() {
     pause();
-    let handle = create_supervisor_and_get_handle().await;
+    let handle = supervisor_handle();
 
     let healthy_run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let healthy_task = HealthyTask {

@@ -2,22 +2,9 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome};
+use task_supervisor::{SupervisedTask, TaskOutcome};
 
-// Helper function to create a supervisor with default settings
-#[allow(unused)]
-pub async fn create_supervisor_and_get_handle() -> task_supervisor::SupervisorHandle {
-    let supervisor = SupervisorBuilder::new()
-        .with_timeout_threshold(Duration::from_millis(200))
-        .with_heartbeat_interval(Duration::from_millis(50))
-        .with_health_check_initial_delay(Duration::from_millis(100))
-        .with_health_check_interval(Duration::from_millis(10))
-        .with_max_restart_attempts(3)
-        .with_base_restart_delay(Duration::from_millis(10))
-        .build();
-    supervisor.run()
-}
-
+/// Increments its `run_count` and completes after 100ms.
 #[derive(Clone)]
 pub struct CompletingTask {
     pub run_count: Arc<AtomicUsize>,
@@ -32,6 +19,7 @@ impl SupervisedTask for CompletingTask {
     }
 }
 
+/// Increments its `run_count` and fails immediatly.
 #[derive(Clone)]
 pub struct FailingTask {
     pub run_count: Arc<AtomicUsize>,
@@ -45,6 +33,7 @@ impl SupervisedTask for FailingTask {
     }
 }
 
+/// Runs forever while `run_flag` is True. Else, completes.
 #[derive(Clone)]
 pub struct HealthyTask {
     pub run_flag: Arc<std::sync::atomic::AtomicBool>,
@@ -60,21 +49,7 @@ impl SupervisedTask for HealthyTask {
     }
 }
 
-#[derive(Clone)]
-pub struct NoHeartbeatTask {
-    pub run_flag: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[async_trait]
-impl SupervisedTask for NoHeartbeatTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
-        while self.run_flag.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        Ok(TaskOutcome::Completed)
-    }
-}
-
+/// Completes immediatly.
 #[derive(Clone)]
 pub struct ImmediateCompleteTask;
 
@@ -85,6 +60,7 @@ impl SupervisedTask for ImmediateCompleteTask {
     }
 }
 
+/// Fails immediatly.
 #[derive(Clone)]
 pub struct ImmediateFailTask;
 
