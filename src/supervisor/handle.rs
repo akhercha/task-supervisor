@@ -41,6 +41,15 @@ pub struct SupervisorHandle {
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage>,
 }
 
+impl Drop for SupervisorHandle {
+    /// Automatically shuts down the supervisor when the handle is dropped.
+    fn drop(&mut self) {
+        if self.is_channel_open() {
+            let _ = self.shutdown();
+        }
+    }
+}
+
 impl SupervisorHandle {
     /// Creates a new `SupervisorHandle`.
     ///
@@ -191,5 +200,10 @@ impl SupervisorHandle {
             .send(SupervisorMessage::GetAllTaskStatuses(sender))
             .map_err(SupervisorHandleError::SendError)?;
         receiver.await.map_err(SupervisorHandleError::RecvError)
+    }
+
+    /// Checks if the supervisor channel is still open.
+    fn is_channel_open(&self) -> bool {
+        !self.tx.is_closed()
     }
 }
