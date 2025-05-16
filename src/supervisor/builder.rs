@@ -14,7 +14,6 @@ use crate::{
 pub struct SupervisorBuilder {
     tasks: HashMap<String, TaskHandle>,
     timeout_threshold: Duration,
-    heartbeat_interval: Duration,
     health_check_initial_delay: Duration,
     health_check_interval: Duration,
     max_restart_attempts: u32,
@@ -27,8 +26,7 @@ impl SupervisorBuilder {
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
-            timeout_threshold: Duration::from_secs(2),
-            heartbeat_interval: Duration::from_millis(100),
+            timeout_threshold: Duration::from_secs(10),
             health_check_initial_delay: Duration::from_secs(3),
             health_check_interval: Duration::from_millis(200),
             max_restart_attempts: 5,
@@ -48,12 +46,6 @@ impl SupervisorBuilder {
     /// Sets the timeout threshold for detecting task crashes.
     pub fn with_timeout_threshold(mut self, threshold: Duration) -> Self {
         self.timeout_threshold = threshold;
-        self
-    }
-
-    /// Sets the interval at which tasks send heartbeats.
-    pub fn with_heartbeat_interval(mut self, interval: Duration) -> Self {
-        self.heartbeat_interval = interval;
         self
     }
 
@@ -95,7 +87,6 @@ impl SupervisorBuilder {
         Supervisor {
             tasks: self.tasks,
             timeout_threshold: self.timeout_threshold,
-            heartbeat_interval: self.heartbeat_interval,
             health_check_initial_delay: self.health_check_initial_delay,
             health_check_interval: self.health_check_interval,
             base_restart_delay: self.base_restart_delay,

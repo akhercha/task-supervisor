@@ -11,7 +11,6 @@ use common::{CompletingTask, HealthyTask, ImmediateCompleteTask};
 fn supervisor_handle() -> SupervisorHandle {
     SupervisorBuilder::new()
         .with_timeout_threshold(Duration::from_millis(200))
-        .with_heartbeat_interval(Duration::from_millis(50))
         .with_health_check_initial_delay(Duration::from_millis(100))
         .with_health_check_interval(Duration::from_millis(100))
         .with_max_restart_attempts(3)
@@ -22,6 +21,10 @@ fn supervisor_handle() -> SupervisorHandle {
 
 #[tokio::test]
 async fn test_add_task_dynamically() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
 
     let handle = supervisor_handle();
@@ -39,7 +42,12 @@ async fn test_add_task_dynamically() {
 
 #[tokio::test]
 async fn test_restart_task() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = supervisor_handle();
 
     let task = CompletingTask {
@@ -61,7 +69,12 @@ async fn test_restart_task() {
 
 #[tokio::test]
 async fn test_kill_task() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = supervisor_handle();
 
     let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -80,7 +93,12 @@ async fn test_kill_task() {
 
 #[tokio::test]
 async fn test_supervisor_shutdown() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = supervisor_handle();
 
     let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -100,7 +118,12 @@ async fn test_supervisor_shutdown() {
 
 #[tokio::test]
 async fn test_error_handling() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = supervisor_handle();
 
     handle.shutdown().unwrap();

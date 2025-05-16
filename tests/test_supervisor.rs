@@ -10,9 +10,12 @@ use task_supervisor::{SupervisorBuilder, SupervisorHandle, TaskStatus};
 use common::{FailingTask, HealthyTask};
 
 fn supervisor_handle() -> SupervisorHandle {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     SupervisorBuilder::new()
         .with_timeout_threshold(Duration::from_millis(200))
-        .with_heartbeat_interval(Duration::from_millis(50))
         .with_health_check_initial_delay(Duration::from_millis(100))
         .with_health_check_interval(Duration::from_millis(50))
         .with_max_restart_attempts(3)

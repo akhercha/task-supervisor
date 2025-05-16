@@ -8,10 +8,13 @@ use common::{CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateFailTa
 
 #[tokio::test]
 async fn test_task_completes_successfully() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(50))
         .build()
         .run();
     let task = CompletingTask {
@@ -31,10 +34,13 @@ async fn test_task_completes_successfully() {
 
 #[tokio::test]
 async fn test_task_fails_and_restarts() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(50))
         .with_max_restart_attempts(3)
         .with_base_restart_delay(std::time::Duration::from_millis(100))
         .build()
@@ -56,6 +62,10 @@ async fn test_task_fails_and_restarts() {
 
 #[tokio::test]
 async fn test_immediate_complete_task() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(200))
@@ -75,6 +85,10 @@ async fn test_immediate_complete_task() {
 
 #[tokio::test]
 async fn test_immediate_fail_task() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(200))

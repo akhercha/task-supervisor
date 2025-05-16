@@ -7,10 +7,14 @@ use tokio::time::{advance, pause};
 
 #[tokio::test]
 async fn test_custom_completion() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(20))
         .with_health_check_initial_delay(std::time::Duration::from_millis(50))
         .with_health_check_interval(std::time::Duration::from_millis(50))
         .with_max_restart_attempts(2)
@@ -34,10 +38,14 @@ async fn test_custom_completion() {
 
 #[tokio::test]
 async fn test_custom_infinite() {
+    let env = tracing_subscriber::EnvFilter::from_default_env();
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(env)
+        .without_time();
     pause();
+
     let handle = SupervisorBuilder::new()
         .with_timeout_threshold(std::time::Duration::from_millis(20))
-        .with_heartbeat_interval(std::time::Duration::from_millis(10))
         .with_health_check_initial_delay(std::time::Duration::from_millis(50))
         .with_health_check_interval(std::time::Duration::from_millis(50))
         .build()
