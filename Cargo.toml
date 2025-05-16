@@ -14,10 +14,7 @@ license = "MIT"
 tokio = { version = "^1.43.0", features = ["full", "test-util"] }
 tokio-util = "0.7.13"
 async-trait = "0.1.87"
-futures = "0.3.31"
 thiserror = "2.0.12"
-tracing = "0.1.41"
 
 [dev-dependencies]
 anyhow = "1.0.97"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
