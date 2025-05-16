@@ -13,8 +13,6 @@ use crate::{
 /// and per-task restart settings.
 pub struct SupervisorBuilder {
     tasks: HashMap<String, TaskHandle>,
-    timeout_threshold: Duration,
-    health_check_initial_delay: Duration,
     health_check_interval: Duration,
     max_restart_attempts: u32,
     base_restart_delay: Duration,
@@ -26,8 +24,6 @@ impl SupervisorBuilder {
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
-            timeout_threshold: Duration::from_secs(10),
-            health_check_initial_delay: Duration::from_secs(3),
             health_check_interval: Duration::from_millis(200),
             max_restart_attempts: 5,
             base_restart_delay: Duration::from_secs(1),
@@ -40,18 +36,6 @@ impl SupervisorBuilder {
         let handle =
             TaskHandle::from_task(task, self.max_restart_attempts, self.base_restart_delay);
         self.tasks.insert(name.into(), handle);
-        self
-    }
-
-    /// Sets the timeout threshold for detecting task crashes.
-    pub fn with_timeout_threshold(mut self, threshold: Duration) -> Self {
-        self.timeout_threshold = threshold;
-        self
-    }
-
-    /// Sets the initial delay before health checks begin.
-    pub fn with_health_check_initial_delay(mut self, delay: Duration) -> Self {
-        self.health_check_initial_delay = delay;
         self
     }
 
@@ -86,8 +70,6 @@ impl SupervisorBuilder {
         let (user_tx, user_rx) = mpsc::unbounded_channel();
         Supervisor {
             tasks: self.tasks,
-            timeout_threshold: self.timeout_threshold,
-            health_check_initial_delay: self.health_check_initial_delay,
             health_check_interval: self.health_check_interval,
             base_restart_delay: self.base_restart_delay,
             max_restart_attempts: self.max_restart_attempts,

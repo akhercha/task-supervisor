@@ -10,13 +10,7 @@ use task_supervisor::{SupervisorBuilder, SupervisorHandle, TaskStatus};
 use common::{FailingTask, HealthyTask};
 
 fn supervisor_handle() -> SupervisorHandle {
-    let env = tracing_subscriber::EnvFilter::from_default_env();
-    let _ = tracing_subscriber::fmt::Subscriber::builder()
-        .with_env_filter(env)
-        .without_time();
     SupervisorBuilder::new()
-        .with_timeout_threshold(Duration::from_millis(200))
-        .with_health_check_initial_delay(Duration::from_millis(100))
         .with_health_check_interval(Duration::from_millis(50))
         .with_max_restart_attempts(3)
         .with_base_restart_delay(Duration::from_millis(100))
@@ -94,7 +88,7 @@ async fn test_multiple_tasks() {
         .add_task("no_heartbeat_task", no_heartbeat_task)
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     let healthy_status = handle
         .get_task_status("healthy_task")

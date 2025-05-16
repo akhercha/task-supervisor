@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::{sync::mpsc, time::interval_at};
+use tokio::{sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -34,8 +34,6 @@ pub struct Supervisor {
     // List of current tasks
     tasks: HashMap<String, TaskHandle>,
     // Durations for tasks lifecycle
-    timeout_threshold: Duration,
-    health_check_initial_delay: Duration,
     health_check_interval: Duration,
     base_restart_delay: Duration,
     task_is_stable_after: Duration,
@@ -75,12 +73,11 @@ impl Supervisor {
 
     /// Supervises tasks by processing messages and performing periodic health checks.
     async fn supervise_all_tasks(&mut self) {
-        let start_time = tokio::time::Instant::now() + self.health_check_initial_delay;
-        let mut health_check_ticker = interval_at(start_time, self.health_check_interval);
+        let mut health_check_ticker = interval(self.health_check_interval);
 
         loop {
             tokio::select! {
-                biased; // Process internal messages with higher priority if many are pending
+                biased;
                 Some(internal_msg) = self.internal_rx.recv() => {
                     if matches!(internal_msg, SupervisedTaskMessage::Shutdown) {
                         return;
@@ -172,7 +169,7 @@ impl Supervisor {
         internal_tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
     ) {
         task_handle.started_at = Some(Instant::now());
-        task_handle.mark(TaskStatus::Starting);
+        task_handle.mark(TaskStatus::Healthy);
 
         let token = CancellationToken::new();
         task_handle.cancellation_token = Some(token.clone());
@@ -221,47 +218,29 @@ impl Supervisor {
     async fn restart_task(&mut self, task_name: String) {
         if let Some(task_handle) = self.tasks.get_mut(&task_name) {
             task_handle.clean().await;
-            task_handle.mark(TaskStatus::Starting);
             Self::start_task(task_name, task_handle, self.internal_tx.clone()).await;
         }
     }
 
     async fn check_all_health(&mut self) {
-        let mut tasks_needing_restart_check: Vec<String> = Vec::new();
+        let mut tasks_needing_restart: Vec<String> = Vec::new();
         let now = Instant::now();
 
         for (task_name, task_handle) in self.tasks.iter_mut() {
             match task_handle.status {
-                TaskStatus::Starting => {
-                    if let Some(started_at) = task_handle.started_at {
-                        if now.duration_since(started_at) > self.timeout_threshold {
-                            task_handle.mark(TaskStatus::Failed);
-                            tasks_needing_restart_check.push(task_name.clone());
-                            continue;
-                        }
-                    }
-                    if let Some(main_handle) = &task_handle.main_task_join_handle {
-                        if main_handle.is_finished() {
-                            task_handle.mark(TaskStatus::Failed);
-                            tasks_needing_restart_check.push(task_name.clone());
-                        } else {
-                            task_handle.mark(TaskStatus::Healthy);
-                            task_handle.healthy_since = Some(now);
-                        }
-                    } else {
-                        task_handle.mark(TaskStatus::Failed);
-                        tasks_needing_restart_check.push(task_name.clone());
-                    }
+                // TODO: Handle `Created` tasks?
+                TaskStatus::Created => {
+                    panic!("Tasks shouldn't be in the Created status there!")
                 }
                 TaskStatus::Healthy => {
                     if let Some(main_handle) = &task_handle.main_task_join_handle {
                         if main_handle.is_finished() {
                             task_handle.mark(TaskStatus::Failed);
-                            tasks_needing_restart_check.push(task_name.clone());
+                            tasks_needing_restart.push(task_name.clone());
                         } else {
                             // Task is Healthy and running. Check for stability.
                             if let Some(healthy_since) = task_handle.healthy_since {
-                                if now.duration_since(healthy_since) > self.task_is_stable_after
+                                if (now.duration_since(healthy_since) > self.task_is_stable_after)
                                     && task_handle.restart_attempts > 0
                                 {
                                     task_handle.restart_attempts = 0;
@@ -272,38 +251,34 @@ impl Supervisor {
                         }
                     } else {
                         task_handle.mark(TaskStatus::Failed);
-                        tasks_needing_restart_check.push(task_name.clone());
+                        tasks_needing_restart.push(task_name.clone());
                     }
                 }
                 _ => {}
             }
         }
 
-        for task_name_to_check in tasks_needing_restart_check {
-            if let Some(task_handle) = self.tasks.get_mut(&task_name_to_check) {
-                // This task was marked Failed by the loop above.
-                // Now apply restart policy.
-                if task_handle.status == TaskStatus::Failed {
-                    // Ensure it's still failed
-                    if task_handle.has_exceeded_max_retries() {
-                        task_handle.mark(TaskStatus::Dead);
-                        task_handle.clean().await;
-                        continue;
-                    }
+        for task_name in tasks_needing_restart {
+            let Some(task_handle) = self.tasks.get_mut(&task_name) else {
+                continue;
+            };
 
-                    // Increment before calculating delay for the current attempt
-                    task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
-                    let restart_delay = task_handle.restart_delay();
-
-                    let internal_tx_clone = self.internal_tx.clone();
-                    // Clean is called by restart_task, so not needed here if sending Restart message
-                    tokio::spawn(async move {
-                        tokio::time::sleep(restart_delay).await;
-                        let _ = internal_tx_clone
-                            .send(SupervisedTaskMessage::Restart(task_name_to_check.clone()));
-                    });
-                }
+            // Ensure it's still failed
+            if task_handle.has_exceeded_max_retries() {
+                task_handle.mark(TaskStatus::Dead);
+                task_handle.clean().await;
+                continue;
             }
+
+            // Increment before calculating delay for the current attempt
+            task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
+            let restart_delay = task_handle.restart_delay();
+
+            let internal_tx_clone = self.internal_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(restart_delay).await;
+                let _ = internal_tx_clone.send(SupervisedTaskMessage::Restart(task_name.clone()));
+            });
         }
     }
 
@@ -312,14 +287,7 @@ impl Supervisor {
             return;
         };
 
-        task_handle.main_task_join_handle.take();
-        for handle in task_handle.auxiliary_join_handles.drain(..) {
-            handle.abort();
-        }
-        if let Some(token) = task_handle.cancellation_token.take() {
-            token.cancel();
-        }
-        task_handle.healthy_since = None;
+        task_handle.clean().await;
 
         match outcome {
             TaskOutcome::Completed => {

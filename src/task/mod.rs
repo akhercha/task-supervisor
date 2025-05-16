@@ -33,8 +33,6 @@ where
 pub enum TaskStatus {
     /// Task has been created but not yet started.
     Created,
-    /// Task is in the process of starting.
-    Starting,
     /// Task is running and healthy.
     Healthy,
     /// Task has failed and is pending restart.
@@ -67,7 +65,6 @@ impl std::fmt::Display for TaskStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Created => write!(f, "created"),
-            Self::Starting => write!(f, "starting"),
             Self::Healthy => write!(f, "healthy"),
             Self::Failed => write!(f, "failed"),
             Self::Completed => write!(f, "completed"),
@@ -159,14 +156,13 @@ impl TaskHandle {
         if let Some(token) = self.cancellation_token.take() {
             token.cancel();
         }
-        self.healthy_since = None;
-        self.started_at = None;
-
         if let Some(handle) = self.main_task_join_handle.take() {
             handle.abort();
         }
         for handle in self.auxiliary_join_handles.drain(..) {
             handle.abort();
         }
+        self.healthy_since = None;
+        self.started_at = None;
     }
 }
