@@ -227,34 +227,27 @@ impl Supervisor {
         let now = Instant::now();
 
         for (task_name, task_handle) in self.tasks.iter_mut() {
-            match task_handle.status {
-                // TODO: Handle `Created` tasks?
-                TaskStatus::Created => {
-                    panic!("Tasks shouldn't be in the Created status there!")
-                }
-                TaskStatus::Healthy => {
-                    if let Some(main_handle) = &task_handle.main_task_join_handle {
-                        if main_handle.is_finished() {
-                            task_handle.mark(TaskStatus::Failed);
-                            tasks_needing_restart.push(task_name.clone());
-                        } else {
-                            // Task is Healthy and running. Check for stability.
-                            if let Some(healthy_since) = task_handle.healthy_since {
-                                if (now.duration_since(healthy_since) > self.task_is_stable_after)
-                                    && task_handle.restart_attempts > 0
-                                {
-                                    task_handle.restart_attempts = 0;
-                                }
-                            } else {
-                                task_handle.healthy_since = Some(now);
-                            }
-                        }
-                    } else {
+            if task_handle.status == TaskStatus::Healthy {
+                if let Some(main_handle) = &task_handle.main_task_join_handle {
+                    if main_handle.is_finished() {
                         task_handle.mark(TaskStatus::Failed);
                         tasks_needing_restart.push(task_name.clone());
+                    } else {
+                        // Task is Healthy and running. Check for stability.
+                        if let Some(healthy_since) = task_handle.healthy_since {
+                            if (now.duration_since(healthy_since) > self.task_is_stable_after)
+                                && task_handle.restart_attempts > 0
+                            {
+                                task_handle.restart_attempts = 0;
+                            }
+                        } else {
+                            task_handle.healthy_since = Some(now);
+                        }
                     }
+                } else {
+                    task_handle.mark(TaskStatus::Failed);
+                    tasks_needing_restart.push(task_name.clone());
                 }
-                _ => {}
             }
         }
 
