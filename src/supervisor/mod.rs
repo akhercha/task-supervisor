@@ -210,8 +210,8 @@ impl Supervisor {
             }
         });
 
-        task_handle.main_task_join_handle = Some(main_task_execution_handle);
-        task_handle.auxiliary_join_handles = vec![completion_listener_handle];
+        task_handle.main_task_handle = Some(main_task_execution_handle);
+        task_handle.completion_task_handle = Some(completion_listener_handle);
     }
 
     /// Restarts a task after cleaning up its previous execution.
@@ -228,7 +228,7 @@ impl Supervisor {
 
         for (task_name, task_handle) in self.tasks.iter_mut() {
             if task_handle.status == TaskStatus::Healthy {
-                if let Some(main_handle) = &task_handle.main_task_join_handle {
+                if let Some(main_handle) = &task_handle.main_task_handle {
                     if main_handle.is_finished() {
                         task_handle.mark(TaskStatus::Failed);
                         tasks_needing_restart.push(task_name.clone());

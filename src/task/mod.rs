@@ -94,8 +94,8 @@ impl std::fmt::Display for TaskOutcome {
 pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
     pub(crate) task: DynTask,
-    pub(crate) main_task_join_handle: Option<JoinHandle<()>>,
-    pub(crate) auxiliary_join_handles: Vec<JoinHandle<()>>,
+    pub(crate) main_task_handle: Option<JoinHandle<()>>,
+    pub(crate) completion_task_handle: Option<JoinHandle<()>>,
     pub(crate) restart_attempts: u32,
     pub(crate) started_at: Option<Instant>,
     pub(crate) healthy_since: Option<Instant>,
@@ -114,8 +114,8 @@ impl TaskHandle {
         Self {
             status: TaskStatus::Created,
             task,
-            main_task_join_handle: None,
-            auxiliary_join_handles: Vec::new(),
+            main_task_handle: None,
+            completion_task_handle: None,
             restart_attempts: 0,
             started_at: None,
             healthy_since: None,
@@ -156,10 +156,10 @@ impl TaskHandle {
         if let Some(token) = self.cancellation_token.take() {
             token.cancel();
         }
-        if let Some(handle) = self.main_task_join_handle.take() {
+        if let Some(handle) = self.main_task_handle.take() {
             handle.abort();
         }
-        for handle in self.auxiliary_join_handles.drain(..) {
+        if let Some(handle) = self.completion_task_handle.take() {
             handle.abort();
         }
         self.healthy_since = None;
