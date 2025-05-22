@@ -14,6 +14,15 @@ use crate::{
     task::{TaskHandle, TaskOutcome, TaskStatus},
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum SupervisorError {
+    #[error("Too many tasks are dead (threshold exceeded: {current_percentage:.2}% > {threshold:.2}%), supervisor shutting down.")]
+    TooManyDeadTasks {
+        current_percentage: f64,
+        threshold: f64,
+    },
+}
+
 /// Internal messages sent from tasks and by the `Supervisor` to manage task lifecycle.
 #[derive(Debug)]
 pub(crate) enum SupervisedTaskMessage {
@@ -38,6 +47,7 @@ pub struct Supervisor {
     base_restart_delay: Duration,
     task_is_stable_after: Duration,
     max_restart_attempts: u32,
+    max_dead_tasks_percentage_threshold: Option<f64>,
     // Channels between the User & the Supervisor
     external_tx: mpsc::UnboundedSender<SupervisorMessage>,
     external_rx: mpsc::UnboundedReceiver<SupervisorMessage>,
@@ -52,16 +62,14 @@ impl Supervisor {
     /// This method initiates all tasks and starts the supervision loop.
     pub fn run(self) -> SupervisorHandle {
         let user_tx = self.external_tx.clone();
-        let handle = tokio::spawn(async move {
-            self.run_and_supervise().await;
-        });
+        let handle = tokio::spawn(async move { self.run_and_supervise().await });
         SupervisorHandle::new(handle, user_tx)
     }
 
     /// Starts and supervises all tasks, running the main supervision loop.
-    async fn run_and_supervise(mut self) {
+    async fn run_and_supervise(mut self) -> Result<(), SupervisorError> {
         self.start_all_tasks().await;
-        self.supervise_all_tasks().await;
+        self.supervise_all_tasks().await
     }
 
     /// Initiates all tasks managed by the supervisor.
@@ -72,17 +80,19 @@ impl Supervisor {
     }
 
     /// Supervises tasks by processing messages and performing periodic health checks.
-    async fn supervise_all_tasks(&mut self) {
+    async fn supervise_all_tasks(&mut self) -> Result<(), SupervisorError> {
         let mut health_check_ticker = interval(self.health_check_interval);
 
         loop {
             tokio::select! {
                 biased;
                 Some(internal_msg) = self.internal_rx.recv() => {
-                    if matches!(internal_msg, SupervisedTaskMessage::Shutdown) {
-                        return;
+                    match internal_msg {
+                        SupervisedTaskMessage::Shutdown => {
+                            return Ok(());
+                        }
+                        _ => self.handle_internal_message(internal_msg).await,
                     }
-                    self.handle_internal_message(internal_msg).await;
                 },
                 Some(user_msg) = self.external_rx.recv() => {
                     self.handle_user_message(user_msg).await;
@@ -91,6 +101,8 @@ impl Supervisor {
                     self.check_all_health().await;
                 }
             }
+
+            self.check_dead_tasks_threshold().await?;
         }
     }
 
@@ -112,6 +124,7 @@ impl Supervisor {
     async fn handle_user_message(&mut self, msg: SupervisorMessage) {
         match msg {
             SupervisorMessage::AddTask(task_name, task_dyn) => {
+                // TODO: This branch should return an error
                 if self.tasks.contains_key(&task_name) {
                     return;
                 }
@@ -131,8 +144,8 @@ impl Supervisor {
             SupervisorMessage::KillTask(task_name) => {
                 if let Some(task_handle) = self.tasks.get_mut(&task_name) {
                     if task_handle.status != TaskStatus::Dead {
-                        task_handle.mark(TaskStatus::Dead); // Mark as Dead first
-                        task_handle.clean().await; // Then clean up its resources
+                        task_handle.mark(TaskStatus::Dead);
+                        task_handle.clean().await;
                     }
                 }
             }
@@ -305,5 +318,39 @@ impl Supervisor {
                 });
             }
         }
+    }
+
+    async fn check_dead_tasks_threshold(&mut self) -> Result<(), SupervisorError> {
+        if let Some(threshold) = self.max_dead_tasks_percentage_threshold {
+            if !self.tasks.is_empty() {
+                let dead_task_count = self
+                    .tasks
+                    .values()
+                    .filter(|handle| handle.status == TaskStatus::Dead)
+                    .count();
+
+                let total_task_count = self.tasks.len();
+                let current_dead_percentage = dead_task_count as f64 / total_task_count as f64;
+
+                if current_dead_percentage > threshold {
+                    // Kill all remaining non-dead/non-completed tasks
+                    for (_, task_handle) in self.tasks.iter_mut() {
+                        if task_handle.status != TaskStatus::Dead
+                            && task_handle.status != TaskStatus::Completed
+                        {
+                            task_handle.clean().await;
+                            task_handle.mark(TaskStatus::Dead);
+                        }
+                    }
+
+                    return Err(SupervisorError::TooManyDeadTasks {
+                        current_percentage: current_dead_percentage * 100.0,
+                        threshold: threshold * 100.0,
+                    });
+                }
+            }
+        };
+
+        Ok(())
     }
 }

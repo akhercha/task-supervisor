@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Wait for the supervisor to complete
-    handle.wait().await?;
+    handle.wait().await??;
     println!("All tasks died and supervisor shut down! 🫡");
 
     Ok(())
