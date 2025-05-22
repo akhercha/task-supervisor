@@ -17,7 +17,7 @@ use crate::{
 /// Internal messages sent from tasks and by the `Supervisor` to manage task lifecycle.
 #[derive(Debug)]
 pub(crate) enum SupervisedTaskMessage {
-    /// Sent by the supervisor to trigger a task restart.
+    /// Sent by the supervisor to itself to trigger a task restart.
     Restart(String),
     /// Sent when a task completes, either successfully or with a failure.
     Completed(String, TaskOutcome),
