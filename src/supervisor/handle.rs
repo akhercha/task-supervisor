@@ -11,6 +11,8 @@ use crate::{
     TaskName, TaskStatus,
 };
 
+use super::SupervisorError;
+
 #[derive(Debug, Error)]
 pub enum SupervisorHandleError {
     #[error("Failed to send message to supervisor: {0}")]
@@ -37,7 +39,8 @@ pub enum SupervisorMessage {
 /// Handle used to interact with the `Supervisor`.
 #[derive(Debug, Clone)]
 pub struct SupervisorHandle {
-    pub(crate) join_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) join_handle: Arc<Mutex<Option<JoinHandle<Result<(), SupervisorError>>>>>,
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage>,
 }
 
@@ -63,7 +66,7 @@ impl SupervisorHandle {
     /// # Returns
     /// A new instance of `SupervisorHandle`.
     pub(crate) fn new(
-        join_handle: JoinHandle<()>,
+        join_handle: JoinHandle<Result<(), SupervisorError>>,
         tx: mpsc::UnboundedSender<SupervisorMessage>,
     ) -> Self {
         Self {
@@ -83,7 +86,7 @@ impl SupervisorHandle {
     ///
     /// # Panics
     /// Panics if `wait()` has already been called on any clone of this handle.
-    pub async fn wait(self) -> Result<(), JoinError> {
+    pub async fn wait(self) -> Result<Result<(), SupervisorError>, JoinError> {
         let handle_opt = {
             let mut guard = self.join_handle.lock().await;
             guard.take()
@@ -91,6 +94,7 @@ impl SupervisorHandle {
 
         match handle_opt {
             Some(handle) => handle.await,
+            // TODO: Do we really want a panic here?
             None => panic!("SupervisorHandle::wait() was already called on a clone of this handle"),
         }
     }

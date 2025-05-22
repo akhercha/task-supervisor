@@ -120,7 +120,7 @@
 pub use supervisor::{
     builder::SupervisorBuilder,
     handle::{SupervisorHandle, SupervisorHandleError},
-    Supervisor,
+    Supervisor, SupervisorError,
 };
 pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
 

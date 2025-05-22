@@ -17,6 +17,7 @@ pub struct SupervisorBuilder {
     max_restart_attempts: u32,
     base_restart_delay: Duration,
     task_stable_after_delay: Duration,
+    max_dead_tasks_percentage_threshold: Option<f64>,
 }
 
 impl SupervisorBuilder {
@@ -28,6 +29,7 @@ impl SupervisorBuilder {
             max_restart_attempts: 5,
             base_restart_delay: Duration::from_secs(1),
             task_stable_after_delay: Duration::from_secs(80),
+            max_dead_tasks_percentage_threshold: None,
         }
     }
 
@@ -64,6 +66,16 @@ impl SupervisorBuilder {
         self
     }
 
+    /// Sets the threshold for the percentage of dead tasks that will trigger a supervisor shutdown.
+    ///
+    /// The `threshold_percentage` should be a value between 0.0 (0%) and 1.0 (100%).
+    /// If the percentage of dead tasks exceeds this value, the supervisor will shut down
+    /// and return an error.
+    pub fn with_dead_tasks_threshold(mut self, threshold_percentage: Option<f64>) -> Self {
+        self.max_dead_tasks_percentage_threshold = threshold_percentage.map(|t| t.clamp(0.0, 1.0));
+        self
+    }
+
     /// Constructs the `Supervisor` with the configured settings.
     pub fn build(self) -> Supervisor {
         let (internal_tx, internal_rx) = mpsc::unbounded_channel();
@@ -74,6 +86,7 @@ impl SupervisorBuilder {
             base_restart_delay: self.base_restart_delay,
             max_restart_attempts: self.max_restart_attempts,
             task_is_stable_after: self.task_stable_after_delay,
+            max_dead_tasks_percentage_threshold: self.max_dead_tasks_percentage_threshold,
             internal_tx,
             internal_rx,
             external_tx: user_tx,
