@@ -9,11 +9,7 @@ use common::{CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateFailTa
 #[tokio::test]
 async fn test_task_completes_successfully() {
     pause();
-    let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(50))
-        .build()
-        .run();
+    let handle = SupervisorBuilder::new().build().run();
     let task = CompletingTask {
         run_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     };
@@ -33,9 +29,8 @@ async fn test_task_completes_successfully() {
 async fn test_task_fails_and_restarts() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(50))
         .with_max_restart_attempts(3)
+        .with_health_check_interval(Duration::from_millis(300))
         .with_base_restart_delay(std::time::Duration::from_millis(100))
         .build()
         .run();
@@ -44,7 +39,7 @@ async fn test_task_fails_and_restarts() {
     };
     handle.add_task("failing_task", task.clone()).unwrap();
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     let status = handle
         .get_task_status("failing_task")
         .await
@@ -57,10 +52,7 @@ async fn test_task_fails_and_restarts() {
 #[tokio::test]
 async fn test_immediate_complete_task() {
     pause();
-    let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .build()
-        .run();
+    let handle = SupervisorBuilder::new().build().run();
     let task = ImmediateCompleteTask;
     handle.add_task("immediate_complete", task).unwrap();
 
@@ -77,7 +69,6 @@ async fn test_immediate_complete_task() {
 async fn test_immediate_fail_task() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(200))
         .with_max_restart_attempts(3)
         .with_base_restart_delay(std::time::Duration::from_millis(100))
         .build()
@@ -85,7 +76,7 @@ async fn test_immediate_fail_task() {
     let task = ImmediateFailTask;
     handle.add_task("immediate_fail", task).unwrap();
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     let status = handle
         .get_task_status("immediate_fail")
         .await

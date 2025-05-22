@@ -3,6 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub type DynTask = Box<dyn CloneableSupervisedTask>;
@@ -32,8 +33,6 @@ where
 pub enum TaskStatus {
     /// Task has been created but not yet started.
     Created,
-    /// Task is in the process of starting.
-    Starting,
     /// Task is running and healthy.
     Healthy,
     /// Task has failed and is pending restart.
@@ -66,7 +65,6 @@ impl std::fmt::Display for TaskStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Created => write!(f, "created"),
-            Self::Starting => write!(f, "starting"),
             Self::Healthy => write!(f, "healthy"),
             Self::Failed => write!(f, "failed"),
             Self::Completed => write!(f, "completed"),
@@ -96,9 +94,10 @@ impl std::fmt::Display for TaskOutcome {
 pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
     pub(crate) task: DynTask,
-    pub(crate) handles: Option<Vec<tokio::task::JoinHandle<()>>>,
-    pub(crate) last_heartbeat: Option<Instant>,
+    pub(crate) main_task_handle: Option<JoinHandle<()>>,
+    pub(crate) completion_task_handle: Option<JoinHandle<()>>,
     pub(crate) restart_attempts: u32,
+    pub(crate) started_at: Option<Instant>,
     pub(crate) healthy_since: Option<Instant>,
     pub(crate) cancellation_token: Option<CancellationToken>,
     max_restart_attempts: u32,
@@ -115,9 +114,10 @@ impl TaskHandle {
         Self {
             status: TaskStatus::Created,
             task,
-            handles: None,
-            last_heartbeat: None,
+            main_task_handle: None,
+            completion_task_handle: None,
             restart_attempts: 0,
+            started_at: None,
             healthy_since: None,
             cancellation_token: None,
             max_restart_attempts,
@@ -133,25 +133,6 @@ impl TaskHandle {
     ) -> Self {
         let task = Box::new(task);
         Self::new(task, max_restart_attempts, base_restart_delay)
-    }
-
-    /// Updates the last heartbeat time.
-    pub(crate) fn ticked_at(&mut self, at: Instant) {
-        self.last_heartbeat = Some(at);
-    }
-
-    /// Calculates the time since the last heartbeat.
-    pub(crate) fn time_since_last_heartbeat(&self) -> Option<Duration> {
-        self.last_heartbeat
-            .map(|last| Instant::now().duration_since(last))
-    }
-
-    /// Checks if the task has crashed based on the timeout threshold.
-    pub(crate) fn has_crashed(&self, timeout_threshold: Duration) -> bool {
-        let Some(time_since_last_heartbeat) = self.time_since_last_heartbeat() else {
-            return !self.is_ko();
-        };
-        !self.is_ko() && time_since_last_heartbeat > timeout_threshold
     }
 
     /// Calculates the restart delay using exponential backoff.
@@ -175,17 +156,13 @@ impl TaskHandle {
         if let Some(token) = self.cancellation_token.take() {
             token.cancel();
         }
-        self.last_heartbeat = None;
-        self.healthy_since = None;
-        if let Some(handles) = self.handles.take() {
-            for handle in handles {
-                handle.abort();
-            }
+        if let Some(handle) = self.main_task_handle.take() {
+            handle.abort();
         }
-    }
-
-    /// Checks if the task is in a failed or dead state.
-    pub(crate) fn is_ko(&self) -> bool {
-        self.status == TaskStatus::Failed || self.status == TaskStatus::Dead
+        if let Some(handle) = self.completion_task_handle.take() {
+            handle.abort();
+        }
+        self.healthy_since = None;
+        self.started_at = None;
     }
 }

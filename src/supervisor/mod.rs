@@ -6,38 +6,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use handle::SupervisorMessage;
-use tokio::{sync::mpsc, time::interval_at};
+use tokio::{sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    supervisor::handle::SupervisorHandle,
+    supervisor::handle::{SupervisorHandle, SupervisorMessage},
     task::{TaskHandle, TaskOutcome, TaskStatus},
 };
-
-/// A heartbeat sent from a task to indicate that it's alive.
-#[derive(Debug, Clone)]
-pub(crate) struct Heartbeat {
-    pub(crate) task_name: String,
-    pub(crate) timestamp: Instant,
-}
-
-impl Heartbeat {
-    /// Creates a new heartbeat for the given task name with the current timestamp.
-    pub fn new(task_name: &String) -> Self {
-        Self {
-            task_name: task_name.to_string(),
-            timestamp: Instant::now(),
-        }
-    }
-}
 
 /// Internal messages sent from tasks and by the `Supervisor` to manage task lifecycle.
 #[derive(Debug)]
 pub(crate) enum SupervisedTaskMessage {
-    /// Sent by tasks to indicate they are alive.
-    Heartbeat(Heartbeat),
-    /// Sent by the supervisor to trigger a task restart.
+    /// Sent by the supervisor to itself to trigger a task restart.
     Restart(String),
     /// Sent when a task completes, either successfully or with a failure.
     Completed(String, TaskOutcome),
@@ -45,7 +25,7 @@ pub(crate) enum SupervisedTaskMessage {
     Shutdown,
 }
 
-/// Manages a set of tasks, ensuring they remain operational through heartbeats and restarts.
+/// Manages a set of tasks, ensuring they remain operational through restarts.
 ///
 /// The `Supervisor` spawns each task with a heartbeat mechanism to monitor liveness.
 /// If a task stops sending heartbeats or fails, it is restarted with an exponential backoff.
@@ -54,9 +34,6 @@ pub struct Supervisor {
     // List of current tasks
     tasks: HashMap<String, TaskHandle>,
     // Durations for tasks lifecycle
-    timeout_threshold: Duration,
-    heartbeat_interval: Duration,
-    health_check_initial_delay: Duration,
     health_check_interval: Duration,
     base_restart_delay: Duration,
     task_is_stable_after: Duration,
@@ -64,7 +41,7 @@ pub struct Supervisor {
     // Channels between the User & the Supervisor
     external_tx: mpsc::UnboundedSender<SupervisorMessage>,
     external_rx: mpsc::UnboundedReceiver<SupervisorMessage>,
-    // Channels used in the Supervisor internally (between threads)
+    // Internal channels used in the Supervisor for actions propagation
     internal_tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
     internal_rx: mpsc::UnboundedReceiver<SupervisedTaskMessage>,
 }
@@ -90,27 +67,18 @@ impl Supervisor {
     /// Initiates all tasks managed by the supervisor.
     async fn start_all_tasks(&mut self) {
         for (task_name, task_handle) in self.tasks.iter_mut() {
-            Self::start_task(
-                task_name.to_string(),
-                task_handle,
-                self.internal_tx.clone(),
-                self.heartbeat_interval,
-            )
-            .await;
+            Self::start_task(task_name.to_string(), task_handle, self.internal_tx.clone()).await;
         }
     }
 
     /// Supervises tasks by processing messages and performing periodic health checks.
     async fn supervise_all_tasks(&mut self) {
-        let mut health_check_interval = interval_at(
-            tokio::time::Instant::now() + self.health_check_initial_delay,
-            self.health_check_interval,
-        );
+        let mut health_check_ticker = interval(self.health_check_interval);
 
         loop {
             tokio::select! {
+                biased;
                 Some(internal_msg) = self.internal_rx.recv() => {
-                    // Exit the supervising loop
                     if matches!(internal_msg, SupervisedTaskMessage::Shutdown) {
                         return;
                     }
@@ -119,8 +87,8 @@ impl Supervisor {
                 Some(user_msg) = self.external_rx.recv() => {
                     self.handle_user_message(user_msg).await;
                 },
-                _ = health_check_interval.tick() => {
-                    self.check_all_health();
+                _ = health_check_ticker.tick() => {
+                    self.check_all_health().await;
                 }
             }
         }
@@ -128,33 +96,31 @@ impl Supervisor {
 
     async fn handle_internal_message(&mut self, msg: SupervisedTaskMessage) {
         match msg {
-            SupervisedTaskMessage::Heartbeat(heartbeat) => {
-                self.register_heartbeat(heartbeat);
-            }
             SupervisedTaskMessage::Restart(task_name) => {
                 self.restart_task(task_name).await;
             }
             SupervisedTaskMessage::Completed(task_name, outcome) => {
                 self.handle_task_completion(task_name, outcome).await;
             }
-            SupervisedTaskMessage::Shutdown => unreachable!(),
+            SupervisedTaskMessage::Shutdown => {
+                unreachable!("Shutdown should be handled by the main select loop to break.");
+            }
         }
     }
 
     /// Processes user commands received via the `SupervisorHandle`.
     async fn handle_user_message(&mut self, msg: SupervisorMessage) {
         match msg {
-            SupervisorMessage::AddTask(task_name, task) => {
+            SupervisorMessage::AddTask(task_name, task_dyn) => {
                 if self.tasks.contains_key(&task_name) {
                     return;
                 }
                 let mut task_handle =
-                    TaskHandle::new(task, self.max_restart_attempts, self.base_restart_delay);
+                    TaskHandle::new(task_dyn, self.max_restart_attempts, self.base_restart_delay);
                 Self::start_task(
                     task_name.clone(),
                     &mut task_handle,
                     self.internal_tx.clone(),
-                    self.heartbeat_interval,
                 )
                 .await;
                 self.tasks.insert(task_name, task_handle);
@@ -163,14 +129,12 @@ impl Supervisor {
                 self.restart_task(task_name).await;
             }
             SupervisorMessage::KillTask(task_name) => {
-                let Some(task_handle) = self.tasks.get_mut(&task_name) else {
-                    return;
-                };
-                if task_handle.status == TaskStatus::Dead {
-                    return;
+                if let Some(task_handle) = self.tasks.get_mut(&task_name) {
+                    if task_handle.status != TaskStatus::Dead {
+                        task_handle.mark(TaskStatus::Dead); // Mark as Dead first
+                        task_handle.clean().await; // Then clean up its resources
+                    }
                 }
-                task_handle.mark(TaskStatus::Dead);
-                task_handle.clean().await;
             }
             SupervisorMessage::GetTaskStatus(task_name, sender) => {
                 let status = self.tasks.get(&task_name).map(|handle| handle.status);
@@ -186,7 +150,9 @@ impl Supervisor {
             }
             SupervisorMessage::Shutdown => {
                 for (_, task_handle) in self.tasks.iter_mut() {
-                    if task_handle.status != TaskStatus::Dead {
+                    if task_handle.status != TaskStatus::Dead
+                        && task_handle.status != TaskStatus::Completed
+                    {
                         task_handle.clean().await;
                         task_handle.mark(TaskStatus::Dead);
                     }
@@ -201,58 +167,38 @@ impl Supervisor {
         task_name: String,
         task_handle: &mut TaskHandle,
         internal_tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
-        heartbeat_interval: Duration,
     ) {
+        task_handle.started_at = Some(Instant::now());
+        task_handle.mark(TaskStatus::Healthy);
+
         let token = CancellationToken::new();
+        task_handle.cancellation_token = Some(token.clone());
 
-        // Completion task
         let (completion_tx, mut completion_rx) = mpsc::channel::<TaskOutcome>(1);
-        let tx_heartbeat = internal_tx.clone();
-        let task_name_clone = task_name.clone();
+
+        // Completion Listener Task
+        let task_name_completion = task_name.clone();
         let token_completion = token.clone();
-        let completion_task = tokio::spawn(async move {
+        let internal_tx_completion = internal_tx.clone();
+        let completion_listener_handle = tokio::spawn(async move {
             tokio::select! {
-                _ = token_completion.cancelled() => {
-                    // Task cancelled
-                }
+                _ = token_completion.cancelled() => { }
                 Some(outcome) = completion_rx.recv() => {
-                    let completion_msg = SupervisedTaskMessage::Completed(task_name_clone, outcome);
-                    let _ = tx_heartbeat.send(completion_msg);
-                    token_completion.cancel(); // Cancel other tasks upon completion
+                    let completion_msg = SupervisedTaskMessage::Completed(task_name_completion.clone(), outcome);
+                    let _ = internal_tx_completion.send(completion_msg);
+                    token_completion.cancel();
                 }
             }
         });
 
-        // Heartbeat task
-        let task_name_heartbeat = task_name.clone();
-        let token_heartbeat = token.clone();
-        let heartbeat_task = tokio::spawn(async move {
-            let mut beat_interval = tokio::time::interval(heartbeat_interval);
-            loop {
-                tokio::select! {
-                    _ = beat_interval.tick() => {
-                        let beat = SupervisedTaskMessage::Heartbeat(Heartbeat::new(&task_name_heartbeat));
-                        if internal_tx.send(beat).is_err() {
-                            break;
-                        }
-                    }
-                    _ = token_heartbeat.cancelled() => {
-                        break; // Stop heartbeat on cancellation
-                    }
-                }
-            }
-        });
-
-        // Main task
-        let mut task = task_handle.task.clone_box();
+        // Main Task Execution
+        let mut task_instance = task_handle.task.clone_box();
         let token_main = token.clone();
-        let ran_task = tokio::spawn(async move {
+        let main_task_execution_handle = tokio::spawn(async move {
             tokio::select! {
-                _ = token_main.cancelled() => {
-                    // Task cancelled
-                }
-                _ = async {
-                    match task.run().await {
+                _ = token_main.cancelled() => { }
+                run_result = task_instance.run() => {
+                    match run_result {
                         Ok(outcome) => {
                             let _ = completion_tx.send(outcome).await;
                         }
@@ -260,98 +206,81 @@ impl Supervisor {
                             let _ = completion_tx.send(TaskOutcome::Failed(e.to_string())).await;
                         }
                     }
-                } => {}
+                }
             }
         });
 
-        // Mark the task as `Starting`
-        task_handle.mark(TaskStatus::Starting);
-        // Store the token and handles in TaskHandle
-        task_handle.cancellation_token = Some(token);
-        task_handle.handles = Some(vec![ran_task, heartbeat_task, completion_task]);
-    }
-
-    /// Updates a task's status based on received heartbeats.
-    fn register_heartbeat(&mut self, heartbeat: Heartbeat) {
-        let Some(task_handle) = self.tasks.get_mut(&heartbeat.task_name) else {
-            return;
-        };
-
-        if task_handle.status == TaskStatus::Dead {
-            return;
-        }
-
-        task_handle.ticked_at(heartbeat.timestamp);
-
-        match task_handle.status {
-            TaskStatus::Starting => {
-                task_handle.mark(TaskStatus::Healthy);
-                task_handle.healthy_since = Some(heartbeat.timestamp);
-            }
-            TaskStatus::Healthy => {
-                // Reset the `restart_attempts` if the task has been healthy & stable for some time
-                if let Some(healthy_since) = task_handle.healthy_since {
-                    if heartbeat.timestamp.duration_since(healthy_since) > self.task_is_stable_after
-                    {
-                        task_handle.restart_attempts = 0;
-                    }
-                } else {
-                    task_handle.healthy_since = Some(heartbeat.timestamp);
-                }
-            }
-            _ => {}
-        }
+        task_handle.main_task_handle = Some(main_task_execution_handle);
+        task_handle.completion_task_handle = Some(completion_listener_handle);
     }
 
     /// Restarts a task after cleaning up its previous execution.
     async fn restart_task(&mut self, task_name: String) {
-        let Some(task_handle) = self.tasks.get_mut(&task_name) else {
-            return;
-        };
-        task_handle.clean().await;
-        task_handle.mark(TaskStatus::Created);
-        Self::start_task(
-            task_name,
-            task_handle,
-            self.internal_tx.clone(),
-            self.heartbeat_interval,
-        )
-        .await;
+        if let Some(task_handle) = self.tasks.get_mut(&task_name) {
+            task_handle.clean().await;
+            Self::start_task(task_name, task_handle, self.internal_tx.clone()).await;
+        }
     }
 
-    /// Checks task health and schedules restarts for crashed tasks.
-    fn check_all_health(&mut self) {
-        let crashed_tasks = self
-            .tasks
-            .iter()
-            .filter(|(_, handle)| handle.has_crashed(self.timeout_threshold))
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
+    async fn check_all_health(&mut self) {
+        let mut tasks_needing_restart: Vec<String> = Vec::new();
+        let now = Instant::now();
 
-        for crashed_task in crashed_tasks {
-            let Some(task_handle) = self.tasks.get_mut(&crashed_task) else {
+        for (task_name, task_handle) in self.tasks.iter_mut() {
+            if task_handle.status == TaskStatus::Healthy {
+                if let Some(main_handle) = &task_handle.main_task_handle {
+                    if main_handle.is_finished() {
+                        task_handle.mark(TaskStatus::Failed);
+                        tasks_needing_restart.push(task_name.clone());
+                    } else {
+                        // Task is Healthy and running. Check for stability.
+                        if let Some(healthy_since) = task_handle.healthy_since {
+                            if (now.duration_since(healthy_since) > self.task_is_stable_after)
+                                && task_handle.restart_attempts > 0
+                            {
+                                task_handle.restart_attempts = 0;
+                            }
+                        } else {
+                            task_handle.healthy_since = Some(now);
+                        }
+                    }
+                } else {
+                    task_handle.mark(TaskStatus::Failed);
+                    tasks_needing_restart.push(task_name.clone());
+                }
+            }
+        }
+
+        for task_name in tasks_needing_restart {
+            let Some(task_handle) = self.tasks.get_mut(&task_name) else {
                 continue;
             };
-            if task_handle.has_exceeded_max_retries() && task_handle.status != TaskStatus::Dead {
+
+            // Ensure it's still failed
+            if task_handle.has_exceeded_max_retries() {
                 task_handle.mark(TaskStatus::Dead);
+                task_handle.clean().await;
                 continue;
             }
-            let restart_delay = task_handle.restart_delay();
-            task_handle.mark(TaskStatus::Failed);
+
+            // Increment before calculating delay for the current attempt
             task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
-            let internal_tx = self.internal_tx.clone();
+            let restart_delay = task_handle.restart_delay();
+
+            let internal_tx_clone = self.internal_tx.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(restart_delay).await;
-                let _ = internal_tx.send(SupervisedTaskMessage::Restart(crashed_task));
+                let _ = internal_tx_clone.send(SupervisedTaskMessage::Restart(task_name.clone()));
             });
         }
     }
 
-    /// Handles task completion outcomes, deciding whether to mark as completed or restart.
     async fn handle_task_completion(&mut self, task_name: String, outcome: TaskOutcome) {
         let Some(task_handle) = self.tasks.get_mut(&task_name) else {
             return;
         };
+
+        task_handle.clean().await;
 
         match outcome {
             TaskOutcome::Completed => {
@@ -359,16 +288,20 @@ impl Supervisor {
             }
             TaskOutcome::Failed(_) => {
                 task_handle.mark(TaskStatus::Failed);
+
                 if task_handle.has_exceeded_max_retries() {
                     task_handle.mark(TaskStatus::Dead);
                     return;
                 }
-                let restart_delay = task_handle.restart_delay();
+
                 task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
-                let internal_tx = self.internal_tx.clone();
+                let restart_delay = task_handle.restart_delay();
+
+                let internal_tx_clone = self.internal_tx.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(restart_delay).await;
-                    let _ = internal_tx.send(SupervisedTaskMessage::Restart(task_name));
+                    let _ =
+                        internal_tx_clone.send(SupervisedTaskMessage::Restart(task_name.clone()));
                 });
             }
         }

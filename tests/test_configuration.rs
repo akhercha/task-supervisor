@@ -8,10 +8,8 @@ use tokio::time::{advance, pause};
 #[tokio::test]
 async fn test_custom_completion() {
     pause();
+
     let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(200))
-        .with_heartbeat_interval(std::time::Duration::from_millis(20))
-        .with_health_check_initial_delay(std::time::Duration::from_millis(50))
         .with_health_check_interval(std::time::Duration::from_millis(50))
         .with_max_restart_attempts(2)
         .with_base_restart_delay(std::time::Duration::from_millis(50))
@@ -35,10 +33,8 @@ async fn test_custom_completion() {
 #[tokio::test]
 async fn test_custom_infinite() {
     pause();
+
     let handle = SupervisorBuilder::new()
-        .with_timeout_threshold(std::time::Duration::from_millis(20))
-        .with_heartbeat_interval(std::time::Duration::from_millis(10))
-        .with_health_check_initial_delay(std::time::Duration::from_millis(50))
         .with_health_check_interval(std::time::Duration::from_millis(50))
         .build()
         .run();
