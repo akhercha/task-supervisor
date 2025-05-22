@@ -3,9 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/supervisor.svg)](https://crates.io/crates/task-supervisor)
 [![Docs.rs](https://docs.rs/supervisor/badge.svg)](https://docs.rs/task-supervisor)
 
-The `task-supervisor` crate is a Rust library for managing and monitoring asynchronous tasks within the Tokio runtime. It ensures tasks remain operational by tracking their health via heartbeats and restarting them if they fail or become unresponsive.
-
-It is really smol and simple for now.
+The `task-supervisor` crate is a library for managing and monitoring asynchronous tasks within the Tokio runtime. It ensures tasks remain operational by tracking their health and restarting them if they fail or become unresponsive.
 
 ## Installation
 
@@ -13,7 +11,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-task-supervisor = "0.1.7"  # Replace with the latest version
+task-supervisor = "0.2.0"  # Replace with the latest version
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
@@ -21,8 +19,6 @@ async-trait = "0.1"
 ## Usage
 
 ### 1. Defining a Supervised Task
-
-Tasks must implement the `SupervisedTask` trait, which requires implementing the `run` method. It defines the task's logic and returns a `TaskOutcome` to indicate completion or failure:
 
 ```rust
 use async_trait::async_trait;
@@ -41,25 +37,25 @@ impl SupervisedTask for MyTask {
             println!("{} Task is running!", self.emoji);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+        // A task could run forever and never return
         println!("{} Task completed!", self.emoji);
         Ok(TaskOutcome::Completed)
     }
 }
 ```
 
-A task can run forever and never return any token.
 
 > [!WARNING]  
 > A task must implement `Clone` for now, since we need to be able to clone it for restarts.
-> This will probably be updated one day.
 
 ### 2. Setting Up and Running the Supervisor
 
 Use the `SupervisorBuilder` to create a supervisor and start supervising tasks. The `SupervisorHandle` allows dynamic task management:
 
 ```rust
-use task_supervisor::{SupervisorBuilder, SupervisorHandleError};
 use std::time::Duration;
+
+use task_supervisor::{SupervisorBuilder, SupervisorHandleError};
 
 #[tokio::main]
 async fn main() -> Result<(), SupervisorHandleError> {
@@ -106,12 +102,15 @@ async fn main() -> Result<(), SupervisorHandleError> {
         println!("Killing task after 5 seconds...");
         h.kill_task("task")?;
 
+        // NOTE: Atm, calling `wait` here will panic since it's already called
+        // from another thread.
+
         h.shutdown().unwrap();
         Ok(())
     })?;
 
     // Wait for the Supervisor to be stopped
-    handle.wait().await?;
+    handle.wait().await??;
     println!("Supervisor stopped! 🫡");
     Ok(())
 }
@@ -131,5 +130,5 @@ Contributions are welcomed! Please:
 2. Submit a pull request with your changes or open an issue for discussion.
 
 ## License
-This crate is licensed under the MIT License. See the LICENSE file for details.
 
+This crate is licensed under the MIT License. See the LICENSE file for details.
