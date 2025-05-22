@@ -344,8 +344,8 @@ impl Supervisor {
                     }
 
                     return Err(SupervisorError::TooManyDeadTasks {
-                        current_percentage: current_dead_percentage * 100.0,
-                        threshold: threshold * 100.0,
+                        current_percentage: current_dead_percentage,
+                        threshold,
                     });
                 }
             }
