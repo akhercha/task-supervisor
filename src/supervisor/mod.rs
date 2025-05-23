@@ -99,10 +99,9 @@ impl Supervisor {
                 },
                 _ = health_check_ticker.tick() => {
                     self.check_all_health().await;
+                    self.check_dead_tasks_threshold().await?;
                 }
             }
-
-            self.check_dead_tasks_threshold().await?;
         }
     }
 

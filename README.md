@@ -11,7 +11,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-task-supervisor = "0.2.0"  # Replace with the latest version
+task-supervisor = "0.2.1"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 ```
