@@ -57,10 +57,10 @@ async fn test_supervisor_shuts_down_when_dead_task_threshold_exceeded() {
 
     // Assert that the supervisor shut down due to the dead task threshold.
     match result {
-        Ok(Err(SupervisorError::TooManyDeadTasks {
+        Err(SupervisorError::TooManyDeadTasks {
             current_percentage,
             threshold,
-        })) => {
+        }) => {
             // current_percentage reported by the error is raw value * 100
             // threshold reported by the error is raw value * 100
             assert!(
@@ -74,11 +74,8 @@ async fn test_supervisor_shuts_down_when_dead_task_threshold_exceeded() {
                 threshold
             );
         }
-        Ok(Ok(())) => {
+        Ok(()) => {
             panic!("Supervisor shut down normally, but expected TooManyDeadTasks error.");
-        }
-        Err(join_err) => {
-            panic!("Supervisor task panicked: {:?}", join_err);
         }
     }
 }
@@ -137,7 +134,7 @@ async fn test_supervisor_does_not_shut_down_if_threshold_not_met() {
     handle.shutdown().unwrap();
     let result = handle.wait().await;
     assert!(
-        matches!(result, Ok(Ok(()))),
+        matches!(result, Ok(())),
         "Supervisor should shut down normally"
     );
 }

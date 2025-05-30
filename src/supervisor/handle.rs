@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot, Mutex},
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinHandle, JoinSet},
 };
 
 use crate::{
@@ -36,12 +36,13 @@ pub enum SupervisorMessage {
     Shutdown,
 }
 
+type SupervisorHandleResult = Result<Result<(), SupervisorError>, JoinError>;
+
 /// Handle used to interact with the `Supervisor`.
 #[derive(Debug, Clone)]
 pub struct SupervisorHandle {
-    #[allow(clippy::type_complexity)]
-    pub(crate) join_handle: Arc<Mutex<Option<JoinHandle<Result<(), SupervisorError>>>>>,
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage>,
+    join_set: Arc<Mutex<JoinSet<SupervisorHandleResult>>>,
 }
 
 impl Drop for SupervisorHandle {
@@ -69,33 +70,37 @@ impl SupervisorHandle {
         join_handle: JoinHandle<Result<(), SupervisorError>>,
         tx: mpsc::UnboundedSender<SupervisorMessage>,
     ) -> Self {
+        let mut join_set = JoinSet::new();
+        join_set.spawn(join_handle);
+
         Self {
-            join_handle: Arc::new(Mutex::new(Some(join_handle))),
             tx,
+            join_set: Arc::new(Mutex::new(join_set)),
         }
     }
 
     /// Waits for the supervisor to complete its execution.
     ///
-    /// This method consumes the handle and waits for the supervisor task to finish.
-    /// It should be called only once per handle, as it takes ownership of the join handle.
-    ///
     /// # Returns
     /// - `Ok(())` if the supervisor completed successfully.
-    /// - `Err(JoinError)` if the supervisor task panicked.
-    ///
-    /// # Panics
-    /// Panics if `wait()` has already been called on any clone of this handle.
-    pub async fn wait(self) -> Result<Result<(), SupervisorError>, JoinError> {
-        let handle_opt = {
-            let mut guard = self.join_handle.lock().await;
-            guard.take()
-        };
+    /// - `Err(SupervisorError)` if the supervisor returned an error.
+    pub async fn wait(&self) -> Result<(), SupervisorError> {
+        let mut join_set = self.join_set.lock().await;
 
-        match handle_opt {
-            Some(handle) => handle.await,
-            // TODO: Do we really want a panic here?
-            None => panic!("SupervisorHandle::wait() was already called on a clone of this handle"),
+        if join_set.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(supervisor_result)) => supervisor_result,
+                // TODO: Handle the join_error & propagate it?
+                Err(_join_error) => Ok(()),
+                _ => Ok(()),
+            }
+        } else {
+            // JoinSet is empty, task already completed
+            Ok(())
         }
     }
 

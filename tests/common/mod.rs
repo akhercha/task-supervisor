@@ -5,7 +5,7 @@ use std::time::Duration;
 use task_supervisor::{SupervisedTask, TaskOutcome};
 
 /// Increments its `run_count` and completes after 100ms.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CompletingTask {
     pub run_count: Arc<AtomicUsize>,
 }
