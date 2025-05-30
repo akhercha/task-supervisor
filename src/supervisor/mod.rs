@@ -14,7 +14,7 @@ use crate::{
     task::{TaskHandle, TaskOutcome, TaskStatus},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum SupervisorError {
     #[error("Too many tasks are dead (threshold exceeded: {current_percentage:.2}% > {threshold:.2}%), supervisor shutting down.")]
     TooManyDeadTasks {
