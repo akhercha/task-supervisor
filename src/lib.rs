@@ -41,7 +41,7 @@
 //! ```rust
 //! use async_trait::async_trait;
 //! use std::time::Duration;
-//! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome, SupervisorHandleError};
+//! use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskError, SupervisorHandleError};
 //!
 //! // A task need to be Clonable for now - so we can restart it easily.
 //! #[derive(Clone)]
@@ -51,13 +51,13 @@
 //!
 //! #[async_trait]
 //! impl SupervisedTask for MyTask {
-//!     async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+//!     async fn run(&mut self) -> Result<(), TaskError> {
 //!         for _ in 0..15 {
 //!             println!("{} Task is running!", self.emoji);
 //!             tokio::time::sleep(Duration::from_secs(1)).await;
 //!         }
 //!         println!("{} Task completed!", self.emoji);
-//!         Ok(TaskOutcome::Completed)
+//!         Ok(())
 //!     }
 //! }
 //!
