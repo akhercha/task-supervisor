@@ -70,3 +70,16 @@ impl SupervisedTask for ImmediateFailTask {
         Err(TaskError::Failure("Immediate failure".to_string()))
     }
 }
+
+/// Fails immediatly & cant recover.
+#[derive(Clone)]
+pub struct ImmediateDieForeverTask;
+
+#[async_trait]
+impl SupervisedTask for ImmediateDieForeverTask {
+    async fn run(&mut self) -> TaskResult {
+        Err(TaskError::UnrecoverableFailure(
+            "Immediate failure".to_string(),
+        ))
+    }
+}
