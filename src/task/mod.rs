@@ -1,18 +1,26 @@
-use std::{
-    error::Error,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 pub type DynTask = Box<dyn CloneableSupervisedTask>;
-pub type TaskError = Box<dyn Error + Send + Sync>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum TaskError {
+    #[error("Task failure: {0}")]
+    Failure(String),
+    #[error("Unrecoverable task failure: {0}")]
+    UnrecoverableFailure(String),
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+}
+
+pub type TaskResult = Result<(), TaskError>;
 
 #[async_trait::async_trait]
 pub trait SupervisedTask: Send + 'static {
     /// Runs the task until completion or failure.
-    async fn run(&mut self) -> Result<TaskOutcome, TaskError>;
+    async fn run(&mut self) -> TaskResult;
 }
 
 pub trait CloneableSupervisedTask: SupervisedTask {
@@ -69,24 +77,6 @@ impl std::fmt::Display for TaskStatus {
             Self::Failed => write!(f, "failed"),
             Self::Completed => write!(f, "completed"),
             Self::Dead => write!(f, "dead"),
-        }
-    }
-}
-
-/// Outcome of a task's execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskOutcome {
-    /// Task completed successfully and should not be restarted.
-    Completed,
-    /// Task failed and may be restarted, with an optional reason.
-    Failed(String),
-}
-
-impl std::fmt::Display for TaskOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Completed => write!(f, "completed"),
-            Self::Failed(e) => write!(f, "failed: {e}"),
         }
     }
 }

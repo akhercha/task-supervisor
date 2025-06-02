@@ -32,14 +32,14 @@ struct MyTask {
 
 #[async_trait]
 impl SupervisedTask for MyTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    async fn run(&mut self) -> Result<(), TaskError> {
         for _ in 0..15 {
             println!("{} Task is running!", self.emoji);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         // A task could run forever and never return
         println!("{} Task completed!", self.emoji);
-        Ok(TaskOutcome::Completed)
+        Ok(())
     }
 }
 ```

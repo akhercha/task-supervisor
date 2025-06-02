@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     supervisor::handle::{SupervisorHandle, SupervisorMessage},
-    task::{TaskHandle, TaskOutcome, TaskStatus},
+    task::{TaskError, TaskHandle, TaskResult, TaskStatus},
 };
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -29,7 +29,7 @@ pub(crate) enum SupervisedTaskMessage {
     /// Sent by the supervisor to itself to trigger a task restart.
     Restart(String),
     /// Sent when a task completes, either successfully or with a failure.
-    Completed(String, TaskOutcome),
+    Completed(String, TaskResult),
     /// Sent when a shutdown signal is asked by the User. Close every tasks & the supervisor.
     Shutdown,
 }
@@ -186,7 +186,7 @@ impl Supervisor {
         let token = CancellationToken::new();
         task_handle.cancellation_token = Some(token.clone());
 
-        let (completion_tx, mut completion_rx) = mpsc::channel::<TaskOutcome>(1);
+        let (completion_tx, mut completion_rx) = mpsc::channel::<TaskResult>(1);
 
         // Completion Listener Task
         let task_name_completion = task_name.clone();
@@ -210,14 +210,7 @@ impl Supervisor {
             tokio::select! {
                 _ = token_main.cancelled() => { }
                 run_result = task_instance.run() => {
-                    match run_result {
-                        Ok(outcome) => {
-                            let _ = completion_tx.send(outcome).await;
-                        }
-                        Err(e) => {
-                            let _ = completion_tx.send(TaskOutcome::Failed(e.to_string())).await;
-                        }
-                    }
+                    let _ = completion_tx.send(run_result).await;
                 }
             }
         });
@@ -287,7 +280,7 @@ impl Supervisor {
         }
     }
 
-    async fn handle_task_completion(&mut self, task_name: String, outcome: TaskOutcome) {
+    async fn handle_task_completion(&mut self, task_name: String, outcome: TaskResult) {
         let Some(task_handle) = self.tasks.get_mut(&task_name) else {
             return;
         };
@@ -295,27 +288,31 @@ impl Supervisor {
         task_handle.clean().await;
 
         match outcome {
-            TaskOutcome::Completed => {
+            Ok(()) => {
                 task_handle.mark(TaskStatus::Completed);
             }
-            TaskOutcome::Failed(_) => {
-                task_handle.mark(TaskStatus::Failed);
+            Err(task_error) => match task_error {
+                TaskError::Failure(_) | TaskError::Other(_) => {
+                    task_handle.mark(TaskStatus::Failed);
+                    if task_handle.has_exceeded_max_retries() {
+                        task_handle.mark(TaskStatus::Dead);
+                        return;
+                    }
 
-                if task_handle.has_exceeded_max_retries() {
-                    task_handle.mark(TaskStatus::Dead);
-                    return;
+                    task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
+                    let restart_delay = task_handle.restart_delay();
+
+                    let internal_tx_clone = self.internal_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(restart_delay).await;
+                        let _ = internal_tx_clone
+                            .send(SupervisedTaskMessage::Restart(task_name.clone()));
+                    });
                 }
-
-                task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
-                let restart_delay = task_handle.restart_delay();
-
-                let internal_tx_clone = self.internal_tx.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(restart_delay).await;
-                    let _ =
-                        internal_tx_clone.send(SupervisedTaskMessage::Restart(task_name.clone()));
-                });
-            }
+                TaskError::UnrecoverableFailure(_) => {
+                    task_handle.mark(TaskStatus::Dead);
+                }
+            },
         }
     }
 

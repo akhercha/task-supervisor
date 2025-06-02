@@ -122,7 +122,7 @@ pub use supervisor::{
     handle::{SupervisorHandle, SupervisorHandleError},
     Supervisor, SupervisorError,
 };
-pub use task::{SupervisedTask, TaskOutcome, TaskStatus};
+pub use task::{SupervisedTask, TaskError, TaskResult, TaskStatus};
 
 mod supervisor;
 mod task;

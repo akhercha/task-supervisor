@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, TaskOutcome};
+use task_supervisor::{SupervisedTask, TaskError, TaskResult};
 
 /// Increments its `run_count` and completes after 100ms.
 #[derive(Clone, Default)]
@@ -12,10 +12,10 @@ pub struct CompletingTask {
 
 #[async_trait]
 impl SupervisedTask for CompletingTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(100)).await;
-        Ok(TaskOutcome::Completed)
+        Ok(())
     }
 }
 
@@ -27,9 +27,9 @@ pub struct FailingTask {
 
 #[async_trait]
 impl SupervisedTask for FailingTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
-        Ok(TaskOutcome::Failed("Task failed".to_string()))
+        Err(TaskError::Failure("Task failed".to_string()))
     }
 }
 
@@ -41,11 +41,11 @@ pub struct HealthyTask {
 
 #[async_trait]
 impl SupervisedTask for HealthyTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
+    async fn run(&mut self) -> TaskResult {
         while self.run_flag.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        Ok(TaskOutcome::Completed)
+        Ok(())
     }
 }
 
@@ -55,8 +55,8 @@ pub struct ImmediateCompleteTask;
 
 #[async_trait]
 impl SupervisedTask for ImmediateCompleteTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(TaskOutcome::Completed)
+    async fn run(&mut self) -> TaskResult {
+        Ok(())
     }
 }
 
@@ -66,7 +66,20 @@ pub struct ImmediateFailTask;
 
 #[async_trait]
 impl SupervisedTask for ImmediateFailTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(TaskOutcome::Failed("Immediate failure".to_string()))
+    async fn run(&mut self) -> TaskResult {
+        Err(TaskError::Failure("Immediate failure".to_string()))
+    }
+}
+
+/// Fails immediatly & cant recover.
+#[derive(Clone)]
+pub struct ImmediateDieForeverTask;
+
+#[async_trait]
+impl SupervisedTask for ImmediateDieForeverTask {
+    async fn run(&mut self) -> TaskResult {
+        Err(TaskError::UnrecoverableFailure(
+            "Immediate failure".to_string(),
+        ))
     }
 }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::error::Error;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome};
+use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskError};
 
 #[derive(Clone)]
 struct MyTask {
@@ -11,13 +11,13 @@ struct MyTask {
 // A simple task that runs for 15 seconds, printing its status periodically.
 #[async_trait]
 impl SupervisedTask for MyTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn Error + Send + Sync>> {
+    async fn run(&mut self) -> Result<(), TaskError> {
         for _ in 0..15 {
             println!("{} Task is running!", self.emoji);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         println!("{} Task completed!", self.emoji);
-        Ok(TaskOutcome::Completed)
+        Ok(())
     }
 }
 
@@ -43,9 +43,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Check the status of the task after 2 seconds
         tokio::time::sleep(Duration::from_secs(2)).await;
         match h.get_task_status("task1").await {
-            Ok(Some(status)) => println!("Task 'task1' status: {:?}", status),
+            Ok(Some(status)) => println!("Task 'task1' status: {status:?}"),
             Ok(None) => println!("Task 'task1' not found"),
-            Err(e) => println!("Error getting task status: {}", e),
+            Err(e) => println!("Error getting task status: {e}"),
         }
 
         // Restart the task after 5 seconds
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(statuses) => {
                 println!("All task statuses:");
                 for (name, status) in statuses {
-                    println!("  {}: {:?}", name, status);
+                    println!("  {name}: {status:?}");
                 }
             }
             Err(e) => println!("Error getting all task statuses: {}", e),
