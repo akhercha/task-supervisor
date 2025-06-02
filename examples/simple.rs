@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::error::Error;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskOutcome};
+use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskError};
 
 #[derive(Clone)]
 struct MyTask {
@@ -11,13 +11,13 @@ struct MyTask {
 // A simple task that runs for 15 seconds, printing its status periodically.
 #[async_trait]
 impl SupervisedTask for MyTask {
-    async fn run(&mut self) -> Result<TaskOutcome, Box<dyn Error + Send + Sync>> {
+    async fn run(&mut self) -> Result<(), TaskError> {
         for _ in 0..15 {
             println!("{} Task is running!", self.emoji);
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         println!("{} Task completed!", self.emoji);
-        Ok(TaskOutcome::Completed)
+        Ok(())
     }
 }
 
