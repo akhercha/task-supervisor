@@ -43,9 +43,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Check the status of the task after 2 seconds
         tokio::time::sleep(Duration::from_secs(2)).await;
         match h.get_task_status("task1").await {
-            Ok(Some(status)) => println!("Task 'task1' status: {:?}", status),
+            Ok(Some(status)) => println!("Task 'task1' status: {status:?}"),
             Ok(None) => println!("Task 'task1' not found"),
-            Err(e) => println!("Error getting task status: {}", e),
+            Err(e) => println!("Error getting task status: {e}"),
         }
 
         // Restart the task after 5 seconds
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(statuses) => {
                 println!("All task statuses:");
                 for (name, status) in statuses {
-                    println!("  {}: {:?}", name, status);
+                    println!("  {name}: {status:?}");
                 }
             }
             Err(e) => println!("Error getting all task statuses: {}", e),

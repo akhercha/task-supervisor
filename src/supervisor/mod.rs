@@ -292,7 +292,7 @@ impl Supervisor {
                 task_handle.mark(TaskStatus::Completed);
             }
             Err(task_error) => match task_error {
-                TaskError::Failure(_) => {
+                TaskError::Failure(_) | TaskError::Other(_) => {
                     task_handle.mark(TaskStatus::Failed);
                     if task_handle.has_exceeded_max_retries() {
                         task_handle.mark(TaskStatus::Dead);

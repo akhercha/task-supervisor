@@ -5,12 +5,14 @@ use tokio_util::sync::CancellationToken;
 
 pub type DynTask = Box<dyn CloneableSupervisedTask>;
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum TaskError {
     #[error("Task failure: {0}")]
     Failure(String),
     #[error("Unrecoverable task failure: {0}")]
     UnrecoverableFailure(String),
+    #[error("Other error: {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub type TaskResult = Result<(), TaskError>;
