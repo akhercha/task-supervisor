@@ -7,13 +7,8 @@ The `task-supervisor` crate is a library for managing and monitoring asynchronou
 
 ## Installation
 
-Add the crate to your `Cargo.toml`:
-
-```toml
-[dependencies]
-task-supervisor = "0.3.0"
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
+```bash
+cargo add task-supervisor 
 ```
 
 ## Usage

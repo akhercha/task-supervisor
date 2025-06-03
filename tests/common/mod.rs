@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, TaskError, TaskResult};
+use task_supervisor::{SupervisedTask, TaskResult};
 
 /// Increments its `run_count` and completes after 100ms.
 #[derive(Clone, Default)]
@@ -29,7 +29,7 @@ pub struct FailingTask {
 impl SupervisedTask for FailingTask {
     async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
-        Err(TaskError::Failure("Task failed".to_string()))
+        Err(anyhow::anyhow!("Task failed!"))
     }
 }
 
@@ -67,19 +67,6 @@ pub struct ImmediateFailTask;
 #[async_trait]
 impl SupervisedTask for ImmediateFailTask {
     async fn run(&mut self) -> TaskResult {
-        Err(TaskError::Failure("Immediate failure".to_string()))
-    }
-}
-
-/// Fails immediatly & cant recover.
-#[derive(Clone)]
-pub struct ImmediateDieForeverTask;
-
-#[async_trait]
-impl SupervisedTask for ImmediateDieForeverTask {
-    async fn run(&mut self) -> TaskResult {
-        Err(TaskError::UnrecoverableFailure(
-            "Immediate failure".to_string(),
-        ))
+        Err(anyhow::anyhow!("Immediate failure!"))
     }
 }

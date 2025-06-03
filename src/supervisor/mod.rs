@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     supervisor::handle::{SupervisorHandle, SupervisorMessage},
-    task::{TaskError, TaskHandle, TaskResult, TaskStatus},
+    task::{TaskHandle, TaskResult, TaskStatus},
 };
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -291,28 +291,23 @@ impl Supervisor {
             Ok(()) => {
                 task_handle.mark(TaskStatus::Completed);
             }
-            Err(task_error) => match task_error {
-                TaskError::Failure(_) | TaskError::Other(_) => {
-                    task_handle.mark(TaskStatus::Failed);
-                    if task_handle.has_exceeded_max_retries() {
-                        task_handle.mark(TaskStatus::Dead);
-                        return;
-                    }
-
-                    task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
-                    let restart_delay = task_handle.restart_delay();
-
-                    let internal_tx_clone = self.internal_tx.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(restart_delay).await;
-                        let _ = internal_tx_clone
-                            .send(SupervisedTaskMessage::Restart(task_name.clone()));
-                    });
-                }
-                TaskError::UnrecoverableFailure(_) => {
+            Err(_) => {
+                task_handle.mark(TaskStatus::Failed);
+                if task_handle.has_exceeded_max_retries() {
                     task_handle.mark(TaskStatus::Dead);
+                    return;
                 }
-            },
+
+                task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
+                let restart_delay = task_handle.restart_delay();
+
+                let internal_tx_clone = self.internal_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(restart_delay).await;
+                    let _ =
+                        internal_tx_clone.send(SupervisedTaskMessage::Restart(task_name.clone()));
+                });
+            }
         }
     }
 

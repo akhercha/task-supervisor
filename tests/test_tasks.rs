@@ -4,9 +4,7 @@ use std::{sync::Arc, time::Duration};
 use task_supervisor::{SupervisorBuilder, TaskStatus};
 use tokio::time::pause;
 
-use common::{
-    CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateDieForeverTask, ImmediateFailTask,
-};
+use common::{CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateFailTask};
 
 #[tokio::test]
 async fn test_task_completes_successfully() {
@@ -84,28 +82,5 @@ async fn test_immediate_fail_task() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(status, TaskStatus::Dead);
-}
-
-#[tokio::test]
-async fn test_immediate_dead_forever_task() {
-    pause();
-    let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(100)
-        .with_health_check_interval(Duration::from_millis(10))
-        .with_base_restart_delay(std::time::Duration::from_millis(100))
-        .build()
-        .run();
-    let task = ImmediateDieForeverTask;
-    handle.add_task("immediate_die_forever", task).unwrap();
-
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    let status = handle
-        .get_task_status("immediate_die_forever")
-        .await
-        .unwrap()
-        .unwrap();
-
     assert_eq!(status, TaskStatus::Dead);
 }
