@@ -9,6 +9,9 @@ use std::{
 use tokio::{sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "with_tracing")]
+use tracing::{debug, error, info, warn};
+
 use crate::{
     supervisor::handle::{SupervisorHandle, SupervisorMessage},
     task::{TaskHandle, TaskResult, TaskStatus},
@@ -89,6 +92,8 @@ impl Supervisor {
                 Some(internal_msg) = self.internal_rx.recv() => {
                     match internal_msg {
                         SupervisedTaskMessage::Shutdown => {
+                            #[cfg(feature = "with_tracing")]
+                            info!("Supervisor received shutdown signal");
                             return Ok(());
                         }
                         _ => self.handle_internal_message(internal_msg).await,
@@ -98,6 +103,8 @@ impl Supervisor {
                     self.handle_user_message(user_msg).await;
                 },
                 _ = health_check_ticker.tick() => {
+                    #[cfg(feature = "with_tracing")]
+                    debug!("Supervisor checking health of all tasks");
                     self.check_all_health().await;
                     self.check_dead_tasks_threshold().await?;
                 }
@@ -108,13 +115,20 @@ impl Supervisor {
     async fn handle_internal_message(&mut self, msg: SupervisedTaskMessage) {
         match msg {
             SupervisedTaskMessage::Restart(task_name) => {
+                #[cfg(feature = "with_tracing")]
+                info!("Processing restart request for task: {task_name}");
                 self.restart_task(task_name).await;
             }
             SupervisedTaskMessage::Completed(task_name, outcome) => {
+                #[cfg(feature = "with_tracing")]
+                match &outcome {
+                    Ok(()) => info!("Task '{task_name}' completed successfully"),
+                    Err(e) => warn!("Task '{task_name}' completed with error: {e}"),
+                }
                 self.handle_task_completion(task_name, outcome).await;
             }
             SupervisedTaskMessage::Shutdown => {
-                unreachable!("Shutdown should be handled by the main select loop to break.");
+                unreachable!("Shutdown is handled by the main select loop.");
             }
         }
     }
@@ -125,8 +139,11 @@ impl Supervisor {
             SupervisorMessage::AddTask(task_name, task_dyn) => {
                 // TODO: This branch should return an error
                 if self.tasks.contains_key(&task_name) {
+                    #[cfg(feature = "with_tracing")]
+                    warn!("Attempted to add task '{task_name}' but it already exists");
                     return;
                 }
+
                 let mut task_handle =
                     TaskHandle::new(task_dyn, self.max_restart_attempts, self.base_restart_delay);
                 Self::start_task(
@@ -138,6 +155,8 @@ impl Supervisor {
                 self.tasks.insert(task_name, task_handle);
             }
             SupervisorMessage::RestartTask(task_name) => {
+                #[cfg(feature = "with_tracing")]
+                info!("User requested restart for task: {task_name}");
                 self.restart_task(task_name).await;
             }
             SupervisorMessage::KillTask(task_name) => {
@@ -146,10 +165,17 @@ impl Supervisor {
                         task_handle.mark(TaskStatus::Dead);
                         task_handle.clean().await;
                     }
+                } else {
+                    #[cfg(feature = "with_tracing")]
+                    warn!("Attempted to kill non-existent task: {task_name}");
                 }
             }
             SupervisorMessage::GetTaskStatus(task_name, sender) => {
                 let status = self.tasks.get(&task_name).map(|handle| handle.status);
+
+                #[cfg(feature = "with_tracing")]
+                debug!("Status query for task '{task_name}': {status:?}");
+
                 let _ = sender.send(status);
             }
             SupervisorMessage::GetAllTaskStatuses(sender) => {
@@ -161,6 +187,9 @@ impl Supervisor {
                 let _ = sender.send(statuses);
             }
             SupervisorMessage::Shutdown => {
+                #[cfg(feature = "with_tracing")]
+                info!("User requested supervisor shutdown");
+
                 for (_, task_handle) in self.tasks.iter_mut() {
                     if task_handle.status != TaskStatus::Dead
                         && task_handle.status != TaskStatus::Completed
@@ -235,6 +264,9 @@ impl Supervisor {
             if task_handle.status == TaskStatus::Healthy {
                 if let Some(main_handle) = &task_handle.main_task_handle {
                     if main_handle.is_finished() {
+                        #[cfg(feature = "with_tracing")]
+                        warn!("Task '{task_name}' unexpectedly finished, marking as failed");
+
                         task_handle.mark(TaskStatus::Failed);
                         tasks_needing_restart.push(task_name.clone());
                     } else {
@@ -243,6 +275,11 @@ impl Supervisor {
                             if (now.duration_since(healthy_since) > self.task_is_stable_after)
                                 && task_handle.restart_attempts > 0
                             {
+                                #[cfg(feature = "with_tracing")]
+                                info!(
+                                    "Task '{task_name}' is now stable, resetting restart attempts",
+                                );
+
                                 task_handle.restart_attempts = 0;
                             }
                         } else {
@@ -250,6 +287,9 @@ impl Supervisor {
                         }
                     }
                 } else {
+                    #[cfg(feature = "with_tracing")]
+                    error!("Task '{task_name}' has no main handle, marking as failed");
+
                     task_handle.mark(TaskStatus::Failed);
                     tasks_needing_restart.push(task_name.clone());
                 }
@@ -263,6 +303,12 @@ impl Supervisor {
 
             // Ensure it's still failed
             if task_handle.has_exceeded_max_retries() {
+                #[cfg(feature = "with_tracing")]
+                error!(
+                    "Task '{task_name}' exceeded max restart attempts ({}), marking as dead",
+                    self.max_restart_attempts
+                );
+
                 task_handle.mark(TaskStatus::Dead);
                 task_handle.clean().await;
                 continue;
@@ -271,6 +317,12 @@ impl Supervisor {
             // Increment before calculating delay for the current attempt
             task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
             let restart_delay = task_handle.restart_delay();
+
+            #[cfg(feature = "with_tracing")]
+            info!(
+                "Scheduling restart for task '{task_name}' in {restart_delay:?} (attempt {}/{})",
+                task_handle.restart_attempts, self.max_restart_attempts
+            );
 
             let internal_tx_clone = self.internal_tx.clone();
             tokio::spawn(async move {
@@ -282,6 +334,8 @@ impl Supervisor {
 
     async fn handle_task_completion(&mut self, task_name: String, outcome: TaskResult) {
         let Some(task_handle) = self.tasks.get_mut(&task_name) else {
+            #[cfg(feature = "with_tracing")]
+            warn!("Received completion for non-existent task: {}", task_name);
             return;
         };
 
@@ -289,17 +343,36 @@ impl Supervisor {
 
         match outcome {
             Ok(()) => {
+                #[cfg(feature = "with_tracing")]
+                info!("Task '{task_name}' completed successfully");
+
                 task_handle.mark(TaskStatus::Completed);
             }
-            Err(_) => {
+            #[allow(unused_variables)]
+            Err(ref e) => {
+                #[cfg(feature = "with_tracing")]
+                warn!("Task '{task_name}' failed with error: {e}");
+
                 task_handle.mark(TaskStatus::Failed);
                 if task_handle.has_exceeded_max_retries() {
+                    #[cfg(feature = "with_tracing")]
+                    error!(
+                        "Task '{task_name}' exceeded max restart attempts after failure, marking as dead",
+                    );
+
                     task_handle.mark(TaskStatus::Dead);
                     return;
                 }
 
                 task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
                 let restart_delay = task_handle.restart_delay();
+
+                #[cfg(feature = "with_tracing")]
+                info!(
+                    "Scheduling restart for failed task '{task_name}' in {restart_delay:?} (attempt {}/{})",
+                    task_handle.restart_attempts,
+                    self.max_restart_attempts
+                );
 
                 let internal_tx_clone = self.internal_tx.clone();
                 tokio::spawn(async move {
@@ -324,11 +397,24 @@ impl Supervisor {
                 let current_dead_percentage = dead_task_count as f64 / total_task_count as f64;
 
                 if current_dead_percentage > threshold {
+                    #[cfg(feature = "with_tracing")]
+                    error!(
+                        "Dead tasks threshold exceeded: {:.2}% > {:.2}% ({}/{} tasks dead)",
+                        current_dead_percentage * 100.0,
+                        threshold * 100.0,
+                        dead_task_count,
+                        total_task_count
+                    );
+
                     // Kill all remaining non-dead/non-completed tasks
-                    for (_, task_handle) in self.tasks.iter_mut() {
+                    #[allow(unused_variables)]
+                    for (task_name, task_handle) in self.tasks.iter_mut() {
                         if task_handle.status != TaskStatus::Dead
                             && task_handle.status != TaskStatus::Completed
                         {
+                            #[cfg(feature = "with_tracing")]
+                            debug!("Killing task '{task_name}' due to threshold breach");
+
                             task_handle.clean().await;
                             task_handle.mark(TaskStatus::Dead);
                         }
