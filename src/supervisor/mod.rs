@@ -351,7 +351,7 @@ impl Supervisor {
             #[allow(unused_variables)]
             Err(ref e) => {
                 #[cfg(feature = "with_tracing")]
-                warn!("Task '{task_name}' failed with error: {e}");
+                error!("Task '{task_name}' failed with error: {e:?}");
 
                 task_handle.mark(TaskStatus::Failed);
                 if task_handle.has_exceeded_max_retries() {
