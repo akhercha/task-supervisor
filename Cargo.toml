@@ -1,6 +1,6 @@
 [package]
 name = "task-supervisor"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 rust-version = "1.81"
 categories = ["asynchronous"]
@@ -14,10 +14,10 @@ license = "MIT"
 with_tracing = ["dep:tracing"]
 
 [dependencies]
-tokio = { version = "^1.43.0", features = ["full", "test-util"] }
-tokio-util = "0.7.13"
-async-trait = "0.1.87"
-thiserror = "2.0.12"
+tokio = { version = "^1", features = ["full", "test-util"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+thiserror = "2"
 anyhow = "1"
 
 tracing = { version = "0.1", optional = true }

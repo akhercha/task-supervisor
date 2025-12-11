@@ -5,6 +5,7 @@ use std::time::Duration;
 use task_supervisor::{SupervisedTask, TaskResult};
 
 /// Increments its `run_count` and completes after 100ms.
+#[allow(unused)]
 #[derive(Clone, Default)]
 pub struct CompletingTask {
     pub run_count: Arc<AtomicUsize>,
@@ -20,6 +21,7 @@ impl SupervisedTask for CompletingTask {
 }
 
 /// Increments its `run_count` and fails immediatly.
+#[allow(unused)]
 #[derive(Clone)]
 pub struct FailingTask {
     pub run_count: Arc<AtomicUsize>,
@@ -34,6 +36,7 @@ impl SupervisedTask for FailingTask {
 }
 
 /// Runs forever while `run_flag` is True. Else, completes.
+#[allow(unused)]
 #[derive(Clone)]
 pub struct HealthyTask {
     pub run_flag: Arc<std::sync::atomic::AtomicBool>,
@@ -50,6 +53,7 @@ impl SupervisedTask for HealthyTask {
 }
 
 /// Completes immediatly.
+#[allow(unused)]
 #[derive(Clone)]
 pub struct ImmediateCompleteTask;
 
@@ -61,6 +65,7 @@ impl SupervisedTask for ImmediateCompleteTask {
 }
 
 /// Fails immediatly.
+#[allow(unused)]
 #[derive(Clone)]
 pub struct ImmediateFailTask;
 

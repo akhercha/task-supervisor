@@ -16,6 +16,7 @@ pub struct SupervisorBuilder {
     health_check_interval: Duration,
     max_restart_attempts: u32,
     base_restart_delay: Duration,
+    max_backoff_exponent: u32,
     task_stable_after_delay: Duration,
     max_dead_tasks_percentage_threshold: Option<f64>,
 }
@@ -28,6 +29,7 @@ impl SupervisorBuilder {
             health_check_interval: Duration::from_millis(200),
             max_restart_attempts: 5,
             base_restart_delay: Duration::from_secs(1),
+            max_backoff_exponent: 5,
             task_stable_after_delay: Duration::from_secs(80),
             max_dead_tasks_percentage_threshold: None,
         }
@@ -35,9 +37,22 @@ impl SupervisorBuilder {
 
     /// Adds a task to the supervisor with the specified name.
     pub fn with_task(mut self, name: &str, task: impl CloneableSupervisedTask) -> Self {
-        let handle =
-            TaskHandle::from_task(task, self.max_restart_attempts, self.base_restart_delay);
+        let handle = TaskHandle::from_task(
+            task,
+            self.max_restart_attempts,
+            self.base_restart_delay,
+            self.max_backoff_exponent,
+        );
         self.tasks.insert(name.into(), handle);
+        self
+    }
+
+    /// Sets the maximum exponent used in exponential backoff.
+    ///
+    /// The restart delay is calculated as `base_restart_delay * 2^min(attempt, max_backoff_exponent)`.
+    /// For example, with a base delay of 1s and exponent cap of 5, the maximum delay is 32s.
+    pub fn with_max_backoff_exponent(mut self, exponent: u32) -> Self {
+        self.max_backoff_exponent = exponent;
         self
     }
 
@@ -85,6 +100,7 @@ impl SupervisorBuilder {
             health_check_interval: self.health_check_interval,
             base_restart_delay: self.base_restart_delay,
             max_restart_attempts: self.max_restart_attempts,
+            max_backoff_exponent: self.max_backoff_exponent,
             task_is_stable_after: self.task_stable_after_delay,
             max_dead_tasks_percentage_threshold: self.max_dead_tasks_percentage_threshold,
             internal_tx,

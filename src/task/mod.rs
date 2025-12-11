@@ -83,6 +83,7 @@ pub(crate) struct TaskHandle {
     pub(crate) cancellation_token: Option<CancellationToken>,
     max_restart_attempts: u32,
     base_restart_delay: Duration,
+    max_backoff_exponent: u32,
 }
 
 impl TaskHandle {
@@ -91,6 +92,7 @@ impl TaskHandle {
         task: Box<dyn CloneableSupervisedTask>,
         max_restart_attempts: u32,
         base_restart_delay: Duration,
+        max_backoff_exponent: u32,
     ) -> Self {
         Self {
             status: TaskStatus::Created,
@@ -103,6 +105,7 @@ impl TaskHandle {
             cancellation_token: None,
             max_restart_attempts,
             base_restart_delay,
+            max_backoff_exponent,
         }
     }
 
@@ -111,14 +114,20 @@ impl TaskHandle {
         task: T,
         max_restart_attempts: u32,
         base_restart_delay: Duration,
+        max_backoff_exponent: u32,
     ) -> Self {
         let task = Box::new(task);
-        Self::new(task, max_restart_attempts, base_restart_delay)
+        Self::new(
+            task,
+            max_restart_attempts,
+            base_restart_delay,
+            max_backoff_exponent,
+        )
     }
 
     /// Calculates the restart delay using exponential backoff.
     pub(crate) fn restart_delay(&self) -> Duration {
-        let factor = 2u32.saturating_pow(self.restart_attempts.min(5));
+        let factor = 2u32.saturating_pow(self.restart_attempts.min(self.max_backoff_exponent));
         self.base_restart_delay.saturating_mul(factor)
     }
 

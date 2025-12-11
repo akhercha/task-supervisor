@@ -50,6 +50,7 @@ pub struct Supervisor {
     base_restart_delay: Duration,
     task_is_stable_after: Duration,
     max_restart_attempts: u32,
+    max_backoff_exponent: u32,
     max_dead_tasks_percentage_threshold: Option<f64>,
     // Channels between the User & the Supervisor
     external_tx: mpsc::UnboundedSender<SupervisorMessage>,
@@ -144,8 +145,13 @@ impl Supervisor {
                     return;
                 }
 
-                let mut task_handle =
-                    TaskHandle::new(task_dyn, self.max_restart_attempts, self.base_restart_delay);
+                let mut task_handle = TaskHandle::new(
+                    task_dyn,
+                    self.max_restart_attempts,
+                    self.base_restart_delay,
+                    self.max_backoff_exponent,
+                );
+
                 Self::start_task(
                     task_name.clone(),
                     &mut task_handle,
