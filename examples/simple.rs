@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("  {name}: {status:?}");
                 }
             }
-            Err(e) => println!("Error getting all task statuses: {}", e),
+            Err(e) => println!("Error getting all task statuses: {e}"),
         }
 
         // Kill the task after 5 seconds
@@ -73,9 +73,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Check the status again after killing
         tokio::time::sleep(Duration::from_secs(2)).await;
         match h.get_task_status("task1").await {
-            Ok(Some(status)) => println!("Task 'task1' status after kill: {:?}", status),
+            Ok(Some(status)) => println!("Task 'task1' status after kill: {status:?}"),
             Ok(None) => println!("Task 'task1' not found after kill"),
-            Err(e) => println!("Error getting task status after kill: {}", e),
+            Err(e) => println!("Error getting task status after kill: {e}"),
         }
 
         // Shutdown the supervisor after 5 seconds

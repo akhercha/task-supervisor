@@ -311,8 +311,9 @@ impl Supervisor {
             if task_handle.has_exceeded_max_retries() {
                 #[cfg(feature = "with_tracing")]
                 error!(
-                    "Task '{task_name}' exceeded max restart attempts ({}), marking as dead",
+                    "Task '{task_name}' exceeded max restart attempts ({:?}), marking as dead",
                     self.max_restart_attempts
+                        .expect("is provided if has exceeded")
                 );
 
                 task_handle.mark(TaskStatus::Dead);
@@ -327,7 +328,10 @@ impl Supervisor {
             #[cfg(feature = "with_tracing")]
             info!(
                 "Scheduling restart for task '{task_name}' in {restart_delay:?} (attempt {}/{})",
-                task_handle.restart_attempts, self.max_restart_attempts
+                task_handle.restart_attempts,
+                self.max_restart_attempts
+                    .map(|t| t.to_string())
+                    .unwrap_or("∞".to_string())
             );
 
             let internal_tx_clone = self.internal_tx.clone();
@@ -378,6 +382,8 @@ impl Supervisor {
                     "Scheduling restart for failed task '{task_name}' in {restart_delay:?} (attempt {}/{})",
                     task_handle.restart_attempts,
                     self.max_restart_attempts
+                    .map(|t| t.to_string())
+                    .unwrap_or("∞".to_string())
                 );
 
                 let internal_tx_clone = self.internal_tx.clone();

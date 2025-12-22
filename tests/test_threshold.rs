@@ -65,13 +65,11 @@ async fn test_supervisor_shuts_down_when_dead_task_threshold_exceeded() {
             // threshold reported by the error is raw value * 100
             assert!(
                 (current_percentage - 0.5).abs() < 0.01,
-                "Expected current percentage to be around 50.0, got {}",
-                current_percentage
+                "Expected current percentage to be around 50.0, got {current_percentage}",
             );
             assert!(
                 (threshold - 0.4).abs() < 0.01,
-                "Expected threshold to be around 40.0, got {}",
-                threshold
+                "Expected threshold to be around 40.0, got {threshold}",
             );
         }
         Ok(()) => {
