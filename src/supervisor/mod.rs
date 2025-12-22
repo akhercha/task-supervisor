@@ -49,7 +49,7 @@ pub struct Supervisor {
     health_check_interval: Duration,
     base_restart_delay: Duration,
     task_is_stable_after: Duration,
-    max_restart_attempts: u32,
+    max_restart_attempts: Option<u32>,
     max_backoff_exponent: u32,
     max_dead_tasks_percentage_threshold: Option<f64>,
     // Channels between the User & the Supervisor
