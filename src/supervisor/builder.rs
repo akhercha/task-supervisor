@@ -14,7 +14,7 @@ use crate::{
 pub struct SupervisorBuilder {
     tasks: HashMap<String, TaskHandle>,
     health_check_interval: Duration,
-    max_restart_attempts: u32,
+    max_restart_attempts: Option<u32>,
     base_restart_delay: Duration,
     max_backoff_exponent: u32,
     task_stable_after_delay: Duration,
@@ -27,7 +27,7 @@ impl SupervisorBuilder {
         Self {
             tasks: HashMap::new(),
             health_check_interval: Duration::from_millis(200),
-            max_restart_attempts: 5,
+            max_restart_attempts: Some(5),
             base_restart_delay: Duration::from_secs(1),
             max_backoff_exponent: 5,
             task_stable_after_delay: Duration::from_secs(80),
@@ -64,7 +64,13 @@ impl SupervisorBuilder {
 
     /// Sets the maximum number of restart attempts for tasks.
     pub fn with_max_restart_attempts(mut self, attempts: u32) -> Self {
-        self.max_restart_attempts = attempts;
+        self.max_restart_attempts = Some(attempts);
+        self
+    }
+
+    /// Disables the restart limit, allowing tasks to restart indefinitely.
+    pub fn with_unlimited_restarts(mut self) -> Self {
+        self.max_restart_attempts = None;
         self
     }
 

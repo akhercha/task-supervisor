@@ -84,3 +84,31 @@ async fn test_immediate_fail_task() {
         .unwrap();
     assert_eq!(status, TaskStatus::Dead);
 }
+
+#[tokio::test]
+async fn test_unlimited_restarts() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_unlimited_restarts()
+        .with_health_check_interval(Duration::from_millis(100))
+        .with_base_restart_delay(Duration::from_millis(50))
+        .with_max_backoff_exponent(0) // No backoff to speed up test
+        .build()
+        .run();
+
+    let task = FailingTask {
+        run_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    };
+    handle.add_task("unlimited_fail", task.clone()).unwrap();
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    let status = handle
+        .get_task_status("unlimited_fail")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_ne!(status, TaskStatus::Dead);
+    assert!(task.run_count.load(std::sync::atomic::Ordering::SeqCst) > 5);
+}

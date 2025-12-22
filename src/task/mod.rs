@@ -81,7 +81,7 @@ pub(crate) struct TaskHandle {
     pub(crate) started_at: Option<Instant>,
     pub(crate) healthy_since: Option<Instant>,
     pub(crate) cancellation_token: Option<CancellationToken>,
-    max_restart_attempts: u32,
+    max_restart_attempts: Option<u32>,
     base_restart_delay: Duration,
     max_backoff_exponent: u32,
 }
@@ -90,7 +90,7 @@ impl TaskHandle {
     /// Creates a `TaskHandle` from a boxed task with default configuration.
     pub(crate) fn new(
         task: Box<dyn CloneableSupervisedTask>,
-        max_restart_attempts: u32,
+        max_restart_attempts: Option<u32>,
         base_restart_delay: Duration,
         max_backoff_exponent: u32,
     ) -> Self {
@@ -112,7 +112,7 @@ impl TaskHandle {
     /// Creates a new `TaskHandle` with custom restart configuration.
     pub(crate) fn from_task<T: CloneableSupervisedTask + 'static>(
         task: T,
-        max_restart_attempts: u32,
+        max_restart_attempts: Option<u32>,
         base_restart_delay: Duration,
         max_backoff_exponent: u32,
     ) -> Self {
@@ -133,7 +133,11 @@ impl TaskHandle {
 
     /// Checks if the task has exceeded its maximum restart attempts.
     pub(crate) const fn has_exceeded_max_retries(&self) -> bool {
-        self.restart_attempts >= self.max_restart_attempts
+        if let Some(max_restart_attempts) = self.max_restart_attempts {
+            self.restart_attempts >= max_restart_attempts
+        } else {
+            false
+        }
     }
 
     /// Updates the task's status.
