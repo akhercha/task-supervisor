@@ -33,14 +33,11 @@ pub(crate) enum SupervisorMessage {
 /// Handle used to interact with the `Supervisor`.
 ///
 /// Cloning this handle is cheap. All clones share the same connection to
-/// the supervisor. Multiple clones can call `wait()` concurrently and all
-/// will receive the result.
+/// the supervisor.
 #[derive(Clone)]
 pub struct SupervisorHandle {
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage>,
-    /// Receives the supervisor's final result. Using a `watch` channel
-    /// allows multiple concurrent `wait()` callers to all see the outcome,
-    /// unlike `JoinSet` which would consume the result on the first `join_next()`.
+    /// Receives the supervisor's final result.
     result_rx: watch::Receiver<Option<Result<(), SupervisorError>>>,
 }
 
@@ -109,7 +106,7 @@ impl SupervisorHandle {
     /// - `Err(SendError)` if the supervisor is no longer running.
     pub fn add_task<T: SupervisedTask + Clone>(
         &self,
-        task_name: &str,
+        task_name: impl Into<String>,
         task: T,
     ) -> Result<(), SupervisorHandleError> {
         self.tx
@@ -125,7 +122,7 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn restart(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
+    pub fn restart(&self, task_name: impl Into<String>) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::RestartTask(task_name.into()))
             .map_err(|_| SupervisorHandleError::SendError)
@@ -139,7 +136,7 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn kill_task(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
+    pub fn kill_task(&self, task_name: impl Into<String>) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::KillTask(task_name.into()))
             .map_err(|_| SupervisorHandleError::SendError)
@@ -167,7 +164,7 @@ impl SupervisorHandle {
     /// - `Err(RecvError)` if communication with the supervisor fails (e.g., it has shut down).
     pub async fn get_task_status(
         &self,
-        task_name: &str,
+        task_name: impl Into<String>,
     ) -> Result<Option<TaskStatus>, SupervisorHandleError> {
         let (sender, receiver) = oneshot::channel();
         self.tx
