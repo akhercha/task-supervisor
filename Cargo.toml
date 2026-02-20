@@ -1,10 +1,10 @@
 [package]
 name = "task-supervisor"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 rust-version = "1.81"
 categories = ["asynchronous"]
-description = "Tokio tasks Supervisor"
+description = "Supervisor for long-lived tokio tasks"
 authors = ["akhercha <adel@pragma.build>"]
 keywords = ["tasks", "tokio", "supervisor"]
 repository = "https://github.com/akhercha/task-supervisor"
