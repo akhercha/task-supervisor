@@ -1,4 +1,4 @@
-//! # 🤖 task-supervisor
+//! # task-supervisor
 //!
 //! [![Crates.io](https://img.shields.io/crates/v/supervisor.svg)](https://crates.io/crates/task-supervisor)
 //! [![Docs.rs](https://docs.rs/supervisor/badge.svg)](https://docs.rs/task-supervisor)
@@ -15,13 +15,11 @@
 //! ## Quick example
 //!
 //! ```rust,no_run
-//! use async_trait::async_trait;
 //! use task_supervisor::{SupervisorBuilder, SupervisedTask, TaskResult};
 //!
 //! #[derive(Clone)]
 //! struct Printer;
 //!
-//! #[async_trait]
 //! impl SupervisedTask for Printer {
 //!     async fn run(&mut self) -> TaskResult {
 //!         println!("hello");
@@ -49,7 +47,7 @@
 //!
 //! ## API overview
 //!
-//! | TaskHandle method               | Purpose                                                           |
+//! | Handle method                   | Purpose                                                           |
 //! | ------------------------------- | ----------------------------------------------------------------- |
 //! | `add_task(name, task)`          | Start a new task while running                                    |
 //! | `restart(name)`                 | Force a restart                                                   |

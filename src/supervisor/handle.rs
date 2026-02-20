@@ -1,48 +1,47 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use thiserror::Error;
-use tokio::{
-    sync::{mpsc, oneshot, Mutex},
-    task::{JoinError, JoinHandle, JoinSet},
-};
+use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::{
-    task::{CloneableSupervisedTask, DynTask},
-    TaskName, TaskStatus,
-};
+use crate::{task::DynTask, SupervisedTask, TaskName, TaskStatus};
 
 use super::SupervisorError;
 
 #[derive(Debug, Error)]
 pub enum SupervisorHandleError {
-    #[error("Failed to send message to supervisor: {0}")]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<SupervisorMessage>),
+    #[error("Failed to send message to supervisor: channel closed")]
+    SendError,
     #[error("Failed to receive response from supervisor: {0}")]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
-pub enum SupervisorMessage {
+pub(crate) enum SupervisorMessage {
     /// Request to add a new running Task
     AddTask(TaskName, DynTask),
     /// Request to restart a Task
     RestartTask(TaskName),
     /// Request to kill a Task
     KillTask(TaskName),
-    /// Request the status of a  Task
+    /// Request the status of a Task
     GetTaskStatus(TaskName, oneshot::Sender<Option<TaskStatus>>),
-    /// Request the status of all Task
+    /// Request the status of all Tasks
     GetAllTaskStatuses(oneshot::Sender<HashMap<TaskName, TaskStatus>>),
     /// Request sent to shutdown all the running Tasks
     Shutdown,
 }
 
-type SupervisorHandleResult = Result<Result<(), SupervisorError>, JoinError>;
-
 /// Handle used to interact with the `Supervisor`.
-#[derive(Debug, Clone)]
+///
+/// Cloning this handle is cheap. All clones share the same connection to
+/// the supervisor. Multiple clones can call `wait()` concurrently and all
+/// will receive the result.
+#[derive(Clone)]
 pub struct SupervisorHandle {
     pub(crate) tx: mpsc::UnboundedSender<SupervisorMessage>,
-    join_set: Arc<Mutex<JoinSet<SupervisorHandleResult>>>,
+    /// Receives the supervisor's final result. Using a `watch` channel
+    /// allows multiple concurrent `wait()` callers to all see the outcome,
+    /// unlike `JoinSet` which would consume the result on the first `join_next()`.
+    result_rx: watch::Receiver<Option<Result<(), SupervisorError>>>,
 }
 
 impl Drop for SupervisorHandle {
@@ -57,56 +56,49 @@ impl Drop for SupervisorHandle {
 impl SupervisorHandle {
     /// Creates a new `SupervisorHandle`.
     ///
-    /// This constructor is for internal use within the crate and initializes the handle
-    /// with the provided join handle and message sender.
-    ///
-    /// # Arguments
-    /// - `join_handle`: The `JoinHandle` representing the supervisor's task.
-    /// - `tx`: The unbounded sender for sending messages to the supervisor.
-    ///
-    /// # Returns
-    /// A new instance of `SupervisorHandle`.
+    /// Spawns a background task that awaits the supervisor's `JoinHandle` and
+    /// broadcasts the result via a `watch` channel.
     pub(crate) fn new(
-        join_handle: JoinHandle<Result<(), SupervisorError>>,
+        join_handle: tokio::task::JoinHandle<Result<(), SupervisorError>>,
         tx: mpsc::UnboundedSender<SupervisorMessage>,
     ) -> Self {
-        let mut join_set = JoinSet::new();
-        join_set.spawn(join_handle);
+        let (result_tx, result_rx) = watch::channel(None);
 
-        Self {
-            tx,
-            join_set: Arc::new(Mutex::new(join_set)),
-        }
+        tokio::spawn(async move {
+            let result = match join_handle.await {
+                Ok(supervisor_result) => supervisor_result,
+                // Supervisor task was cancelled/panicked — treat as Ok
+                Err(_join_error) => Ok(()),
+            };
+            let _ = result_tx.send(Some(result));
+        });
+
+        Self { tx, result_rx }
     }
 
     /// Waits for the supervisor to complete its execution.
+    ///
+    /// Multiple callers can `wait()` concurrently; all will receive the same result.
     ///
     /// # Returns
     /// - `Ok(())` if the supervisor completed successfully.
     /// - `Err(SupervisorError)` if the supervisor returned an error.
     pub async fn wait(&self) -> Result<(), SupervisorError> {
-        let mut join_set = self.join_set.lock().await;
-
-        if join_set.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(Ok(supervisor_result)) => supervisor_result,
-                // TODO: Handle the join_error & propagate it?
-                Err(_join_error) => Ok(()),
-                _ => Ok(()),
+        let mut rx = self.result_rx.clone();
+        // Wait until the value is Some (i.e., the supervisor has finished).
+        loop {
+            if let Some(result) = rx.borrow_and_update().clone() {
+                return result;
             }
-        } else {
-            // JoinSet is empty, task already completed
-            Ok(())
+            // Value is still None — wait for a change.
+            if rx.changed().await.is_err() {
+                // Sender dropped without sending — supervisor is gone.
+                return Ok(());
+            }
         }
     }
 
     /// Adds a new task to the supervisor.
-    ///
-    /// This method sends a message to the supervisor to add a new task with the specified name.
     ///
     /// # Arguments
     /// - `task_name`: The unique name of the task.
@@ -115,19 +107,17 @@ impl SupervisorHandle {
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
     /// - `Err(SendError)` if the supervisor is no longer running.
-    pub fn add_task<T: CloneableSupervisedTask + 'static>(
+    pub fn add_task<T: SupervisedTask + Clone>(
         &self,
         task_name: &str,
         task: T,
     ) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::AddTask(task_name.into(), Box::new(task)))
-            .map_err(SupervisorHandleError::SendError)
+            .map_err(|_| SupervisorHandleError::SendError)
     }
 
     /// Requests the supervisor to restart a specific task.
-    ///
-    /// This method sends a message to the supervisor to restart the task with the given name.
     ///
     /// # Arguments
     /// - `task_name`: The name of the task to restart.
@@ -138,12 +128,10 @@ impl SupervisorHandle {
     pub fn restart(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::RestartTask(task_name.into()))
-            .map_err(SupervisorHandleError::SendError)
+            .map_err(|_| SupervisorHandleError::SendError)
     }
 
     /// Requests the supervisor to kill a specific task.
-    ///
-    /// This method sends a message to the supervisor to terminate the task with the given name.
     ///
     /// # Arguments
     /// - `task_name`: The name of the task to kill.
@@ -154,12 +142,10 @@ impl SupervisorHandle {
     pub fn kill_task(&self, task_name: &str) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::KillTask(task_name.into()))
-            .map_err(SupervisorHandleError::SendError)
+            .map_err(|_| SupervisorHandleError::SendError)
     }
 
     /// Requests the supervisor to shut down all tasks and stop supervision.
-    ///
-    /// This method sends a message to the supervisor to terminate all tasks and cease operation.
     ///
     /// # Returns
     /// - `Ok(())` if the message was sent successfully.
@@ -167,13 +153,10 @@ impl SupervisorHandle {
     pub fn shutdown(&self) -> Result<(), SupervisorHandleError> {
         self.tx
             .send(SupervisorMessage::Shutdown)
-            .map_err(SupervisorHandleError::SendError)
+            .map_err(|_| SupervisorHandleError::SendError)
     }
 
     /// Queries the status of a specific task asynchronously.
-    ///
-    /// This method sends a request to the supervisor to retrieve the status of the specified task
-    /// and awaits the response.
     ///
     /// # Arguments
     /// - `task_name`: The name of the task to query.
@@ -189,14 +172,11 @@ impl SupervisorHandle {
         let (sender, receiver) = oneshot::channel();
         self.tx
             .send(SupervisorMessage::GetTaskStatus(task_name.into(), sender))
-            .map_err(SupervisorHandleError::SendError)?;
+            .map_err(|_| SupervisorHandleError::SendError)?;
         receiver.await.map_err(SupervisorHandleError::RecvError)
     }
 
     /// Queries the statuses of all tasks asynchronously.
-    ///
-    /// This method sends a request to the supervisor to retrieve the statuses of all tasks
-    /// and awaits the response.
     ///
     /// # Returns
     /// - `Ok(HashMap<TaskName, TaskStatus>)` containing the statuses of all tasks.
@@ -207,12 +187,20 @@ impl SupervisorHandle {
         let (sender, receiver) = oneshot::channel();
         self.tx
             .send(SupervisorMessage::GetAllTaskStatuses(sender))
-            .map_err(SupervisorHandleError::SendError)?;
+            .map_err(|_| SupervisorHandleError::SendError)?;
         receiver.await.map_err(SupervisorHandleError::RecvError)
     }
 
     /// Checks if the supervisor channel is still open.
     fn is_channel_open(&self) -> bool {
         !self.tx.is_closed()
+    }
+}
+
+impl std::fmt::Debug for SupervisorHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SupervisorHandle")
+            .field("channel_open", &self.is_channel_open())
+            .finish()
     }
 }

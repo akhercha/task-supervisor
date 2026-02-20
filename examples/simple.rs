@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::error::Error;
 use std::time::Duration;
 use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskError};
@@ -9,7 +8,6 @@ struct MyTask {
 }
 
 // A simple task that runs for 15 seconds, printing its status periodically.
-#[async_trait]
 impl SupervisedTask for MyTask {
     async fn run(&mut self) -> Result<(), TaskError> {
         for _ in 0..15 {
@@ -86,7 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Wait for the supervisor to complete
     handle.wait().await?;
-    println!("All tasks died and supervisor shut down! 🫡");
+    println!("All tasks died and supervisor shut down!");
 
     Ok(())
 }

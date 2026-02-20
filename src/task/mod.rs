@@ -1,31 +1,59 @@
-use std::time::{Duration, Instant};
+use std::{
+    future::Future,
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-pub type DynTask = Box<dyn CloneableSupervisedTask>;
-
 pub type TaskError = anyhow::Error;
 pub type TaskResult = Result<(), TaskError>;
 
-#[async_trait::async_trait]
+/// The trait users implement for tasks managed by the supervisor.
+///
+/// # Example
+/// ```rust
+/// use task_supervisor::{SupervisedTask, TaskResult};
+///
+/// #[derive(Clone)]
+/// struct MyTask;
+///
+/// impl SupervisedTask for MyTask {
+///     async fn run(&mut self) -> TaskResult {
+///         // do work...
+///         Ok(())
+///     }
+/// }
+/// ```
 pub trait SupervisedTask: Send + 'static {
     /// Runs the task until completion or failure.
-    async fn run(&mut self) -> TaskResult;
+    fn run(&mut self) -> impl Future<Output = TaskResult> + Send;
 }
 
-pub trait CloneableSupervisedTask: SupervisedTask {
-    fn clone_box(&self) -> Box<dyn CloneableSupervisedTask>;
+// ---- Internal dyn-compatible wrapper ----
+
+/// Object-safe version of `SupervisedTask` used internally for dynamic dispatch.
+/// Users never see or implement this trait directly.
+pub(crate) trait DynSupervisedTask: Send + 'static {
+    fn run_boxed(&mut self) -> Pin<Box<dyn Future<Output = TaskResult> + Send + '_>>;
+    fn clone_box(&self) -> Box<dyn DynSupervisedTask>;
 }
 
-impl<T> CloneableSupervisedTask for T
+impl<T> DynSupervisedTask for T
 where
     T: SupervisedTask + Clone + Send + 'static,
 {
-    fn clone_box(&self) -> Box<dyn CloneableSupervisedTask> {
+    fn run_boxed(&mut self) -> Pin<Box<dyn Future<Output = TaskResult> + Send + '_>> {
+        Box::pin(self.run())
+    }
+
+    fn clone_box(&self) -> Box<dyn DynSupervisedTask> {
         Box::new(self.clone())
     }
 }
+
+pub(crate) type DynTask = Box<dyn DynSupervisedTask>;
 
 /// Represents the current state of a supervised task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,54 +103,35 @@ impl std::fmt::Display for TaskStatus {
 pub(crate) struct TaskHandle {
     pub(crate) status: TaskStatus,
     pub(crate) task: DynTask,
-    pub(crate) main_task_handle: Option<JoinHandle<()>>,
-    pub(crate) completion_task_handle: Option<JoinHandle<()>>,
+    pub(crate) join_handle: Option<JoinHandle<()>>,
     pub(crate) restart_attempts: u32,
-    pub(crate) started_at: Option<Instant>,
     pub(crate) healthy_since: Option<Instant>,
     pub(crate) cancellation_token: Option<CancellationToken>,
-    max_restart_attempts: Option<u32>,
-    base_restart_delay: Duration,
-    max_backoff_exponent: u32,
+    pub(crate) max_restart_attempts: Option<u32>,
+    pub(crate) base_restart_delay: Duration,
+    pub(crate) max_backoff_exponent: u32,
 }
 
 impl TaskHandle {
-    /// Creates a `TaskHandle` from a boxed task with default configuration.
-    pub(crate) fn new(
-        task: Box<dyn CloneableSupervisedTask>,
-        max_restart_attempts: Option<u32>,
-        base_restart_delay: Duration,
-        max_backoff_exponent: u32,
-    ) -> Self {
+    /// Creates a `TaskHandle` from a boxed task.
+    /// Configuration is set later by the builder at `build()` time.
+    pub(crate) fn new(task: DynTask) -> Self {
         Self {
             status: TaskStatus::Created,
             task,
-            main_task_handle: None,
-            completion_task_handle: None,
+            join_handle: None,
             restart_attempts: 0,
-            started_at: None,
             healthy_since: None,
             cancellation_token: None,
-            max_restart_attempts,
-            base_restart_delay,
-            max_backoff_exponent,
+            max_restart_attempts: None,
+            base_restart_delay: Duration::from_secs(1),
+            max_backoff_exponent: 5,
         }
     }
 
-    /// Creates a new `TaskHandle` with custom restart configuration.
-    pub(crate) fn from_task<T: CloneableSupervisedTask + 'static>(
-        task: T,
-        max_restart_attempts: Option<u32>,
-        base_restart_delay: Duration,
-        max_backoff_exponent: u32,
-    ) -> Self {
-        let task = Box::new(task);
-        Self::new(
-            task,
-            max_restart_attempts,
-            base_restart_delay,
-            max_backoff_exponent,
-        )
+    /// Creates a new `TaskHandle` from a concrete task type.
+    pub(crate) fn from_task<T: SupervisedTask + Clone>(task: T) -> Self {
+        Self::new(Box::new(task))
     }
 
     /// Calculates the restart delay using exponential backoff.
@@ -145,18 +154,14 @@ impl TaskHandle {
         self.status = status;
     }
 
-    /// Cleans up the task by aborting its handle and resetting state.
-    pub(crate) async fn clean(&mut self) {
+    /// Cleans up the task by cancelling its token and aborting the join handle.
+    pub(crate) fn clean(&mut self) {
         if let Some(token) = self.cancellation_token.take() {
             token.cancel();
         }
-        if let Some(handle) = self.main_task_handle.take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.completion_task_handle.take() {
+        if let Some(handle) = self.join_handle.take() {
             handle.abort();
         }
         self.healthy_since = None;
-        self.started_at = None;
     }
 }

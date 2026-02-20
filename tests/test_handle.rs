@@ -95,7 +95,7 @@ async fn test_supervisor_shutdown() {
     advance(Duration::from_millis(200)).await;
 
     let result = handle.get_task_status("task").await;
-    assert!(matches!(result, Err(SupervisorHandleError::SendError(_))));
+    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
 }
 
 #[tokio::test]
@@ -108,8 +108,8 @@ async fn test_error_handling() {
     advance(Duration::from_millis(500)).await;
 
     let result = handle.add_task("task", ImmediateCompleteTask);
-    assert!(matches!(result, Err(SupervisorHandleError::SendError(_))));
+    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
 
     let result = handle.get_task_status("non_existent").await;
-    assert!(matches!(result, Err(SupervisorHandleError::SendError(_))));
+    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
 }

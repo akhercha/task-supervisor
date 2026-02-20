@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +10,6 @@ pub struct CompletingTask {
     pub run_count: Arc<AtomicUsize>,
 }
 
-#[async_trait]
 impl SupervisedTask for CompletingTask {
     async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
@@ -20,14 +18,13 @@ impl SupervisedTask for CompletingTask {
     }
 }
 
-/// Increments its `run_count` and fails immediatly.
+/// Increments its `run_count` and fails immediately.
 #[allow(unused)]
 #[derive(Clone)]
 pub struct FailingTask {
     pub run_count: Arc<AtomicUsize>,
 }
 
-#[async_trait]
 impl SupervisedTask for FailingTask {
     async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
@@ -42,7 +39,6 @@ pub struct HealthyTask {
     pub run_flag: Arc<std::sync::atomic::AtomicBool>,
 }
 
-#[async_trait]
 impl SupervisedTask for HealthyTask {
     async fn run(&mut self) -> TaskResult {
         while self.run_flag.load(Ordering::SeqCst) {
@@ -52,24 +48,22 @@ impl SupervisedTask for HealthyTask {
     }
 }
 
-/// Completes immediatly.
+/// Completes immediately.
 #[allow(unused)]
 #[derive(Clone)]
 pub struct ImmediateCompleteTask;
 
-#[async_trait]
 impl SupervisedTask for ImmediateCompleteTask {
     async fn run(&mut self) -> TaskResult {
         Ok(())
     }
 }
 
-/// Fails immediatly.
+/// Fails immediately.
 #[allow(unused)]
 #[derive(Clone)]
 pub struct ImmediateFailTask;
 
-#[async_trait]
 impl SupervisedTask for ImmediateFailTask {
     async fn run(&mut self) -> TaskResult {
         Err(anyhow::anyhow!("Immediate failure!"))

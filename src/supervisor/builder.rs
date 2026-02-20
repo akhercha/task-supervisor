@@ -1,18 +1,16 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::sync::mpsc;
 
-use crate::{
-    task::{CloneableSupervisedTask, TaskHandle},
-    Supervisor,
-};
+use crate::{task::TaskHandle, SupervisedTask, Supervisor};
 
 /// Builds a `Supervisor` instance with configurable parameters.
 ///
-/// Allows customization of task timeout, heartbeat interval, health check timing,
-/// and per-task restart settings.
+/// Configuration methods can be called in any order. Task restart settings
+/// are applied to all tasks uniformly at `build()` time, regardless of when
+/// `with_task()` was called.
 pub struct SupervisorBuilder {
-    tasks: HashMap<String, TaskHandle>,
+    tasks: HashMap<Arc<str>, TaskHandle>,
     health_check_interval: Duration,
     max_restart_attempts: Option<u32>,
     base_restart_delay: Duration,
@@ -36,14 +34,12 @@ impl SupervisorBuilder {
     }
 
     /// Adds a task to the supervisor with the specified name.
-    pub fn with_task(mut self, name: &str, task: impl CloneableSupervisedTask) -> Self {
-        let handle = TaskHandle::from_task(
-            task,
-            self.max_restart_attempts,
-            self.base_restart_delay,
-            self.max_backoff_exponent,
-        );
-        self.tasks.insert(name.into(), handle);
+    ///
+    /// Task restart configuration is applied at `build()` time, so the
+    /// order of `with_task()` vs configuration methods does not matter.
+    pub fn with_task(mut self, name: &str, task: impl SupervisedTask + Clone) -> Self {
+        let handle = TaskHandle::from_task(task);
+        self.tasks.insert(Arc::from(name), handle);
         self
     }
 
@@ -98,7 +94,18 @@ impl SupervisorBuilder {
     }
 
     /// Constructs the `Supervisor` with the configured settings.
-    pub fn build(self) -> Supervisor {
+    ///
+    /// Applies restart configuration (max attempts, base delay, backoff exponent)
+    /// to all registered tasks.
+    pub fn build(mut self) -> Supervisor {
+        // Apply configuration to all tasks — this fixes the ordering issue where
+        // tasks added before config methods would get stale defaults.
+        for task_handle in self.tasks.values_mut() {
+            task_handle.max_restart_attempts = self.max_restart_attempts;
+            task_handle.base_restart_delay = self.base_restart_delay;
+            task_handle.max_backoff_exponent = self.max_backoff_exponent;
+        }
+
         let (internal_tx, internal_rx) = mpsc::unbounded_channel();
         let (user_tx, user_rx) = mpsc::unbounded_channel();
         Supervisor {
