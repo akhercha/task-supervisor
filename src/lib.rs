@@ -35,7 +35,6 @@
 //!         .run();
 //!
 //!     supervisor.wait().await.unwrap();   // wait until every task finishes or is killed
-//!     Ok(())
 //! }
 //! ```
 //!
