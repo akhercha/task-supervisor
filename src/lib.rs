@@ -41,22 +41,38 @@
 //!
 //! ## What you get
 //!
-//! * **Automatic restarts** – tasks are relaunched after a crash or hang (exponential back-off).
-//! * **Dynamic control** – add, restart, kill, or query tasks through a `SupervisorHandle`.
-//! * **Configurable** – tune health-check interval, restart limits, back-off delay, and shutdown policy.
+//! * **Automatic restarts** – failed tasks are relaunched with exponential back-off.
+//! * **Dynamic control** – add, restart, kill, or query tasks at runtime through a [`SupervisorHandle`].
+//! * **Configurable** – health-check interval, restart limits, back-off, dead-task threshold.
 //!
-//! ## API overview
+//! ## Usage
 //!
-//! | Handle method                   | Purpose                                                           |
-//! | ------------------------------- | ----------------------------------------------------------------- |
-//! | `add_task(name, task)`          | Start a new task while running                                    |
-//! | `restart(name)`                 | Force a restart                                                   |
-//! | `kill_task(name)`               | Stop a task permanently                                           |
-//! | `get_task_status(name).await`   | Return `TaskStatus` (`Healthy`, `Failed`, `Completed`, `Dead`, …) |
-//! | `get_all_task_statuses().await` | Map of all task states                                            |
-//! | `shutdown()`                    | Stop every task and exit                                          |
+//! Build a supervisor with [`SupervisorBuilder`], call [`.build()`](SupervisorBuilder::build)
+//! to get a [`Supervisor`], then [`.run()`](Supervisor::run) to start it. This returns a
+//! [`SupervisorHandle`] you use to control things at runtime:
 //!
-//! Full documentation lives on docs.rs.
+//! | Method                          | Description                                          |
+//! | ------------------------------- | ---------------------------------------------------- |
+//! | `wait().await`                  | Block until the supervisor exits                     |
+//! | `add_task(name, task)`          | Register and start a new task                        |
+//! | `restart(name)`                 | Force-restart a task                                 |
+//! | `kill_task(name)`               | Stop a task permanently                              |
+//! | `get_task_status(name).await`   | Get a task's [`TaskStatus`]                          |
+//! | `get_all_task_statuses().await` | Get every task's status                              |
+//! | `shutdown()`                    | Stop all tasks and exit                              |
+//!
+//! The handle auto-shuts down the supervisor when all clones are dropped.
+//!
+//! ## Clone and restart behaviour
+//!
+//! Every task must implement `Clone`. The supervisor stores the **original**
+//! instance and clones it each time the task is started or restarted.
+//! Mutations made through `&mut self` in [`SupervisedTask::run`] only affect
+//! the running clone and are lost on restart.
+//!
+//! To share state across restarts, wrap it in an `Arc` (e.g. `Arc<AtomicUsize>`).
+//! Plain owned fields will always start from their original value. See the
+//! [`SupervisedTask`] docs for a full example.
 //!
 //! ## License
 //!

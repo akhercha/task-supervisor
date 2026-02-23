@@ -12,29 +12,48 @@ pub type TaskResult = Result<(), TaskError>;
 
 /// The trait users implement for tasks managed by the supervisor.
 ///
+/// # Clone and restart semantics
+///
+/// The supervisor stores the **original** instance and clones it for each
+/// run. Mutations via `&mut self` only live in the clone and are lost on
+/// restart. Shared state (`Arc<...>`) survives because `Clone` just bumps
+/// the refcount.
+///
+/// Use owned fields for per-run state, `Arc` for cross-restart state.
+///
 /// # Example
+///
 /// ```rust
 /// use task_supervisor::{SupervisedTask, TaskResult};
+/// use std::sync::Arc;
+/// use std::sync::atomic::{AtomicUsize, Ordering};
 ///
 /// #[derive(Clone)]
-/// struct MyTask;
+/// struct MyTask {
+///     /// Reset to 0 on every restart (owned, cloned from original).
+///     local_counter: u64,
+///     /// Shared across restarts (Arc, cloned by reference).
+///     total_runs: Arc<AtomicUsize>,
+/// }
 ///
 /// impl SupervisedTask for MyTask {
 ///     async fn run(&mut self) -> TaskResult {
-///         // do work...
+///         self.total_runs.fetch_add(1, Ordering::Relaxed);
+///         self.local_counter += 1;
+///         // local_counter is always 1 here — fresh clone each restart.
 ///         Ok(())
 ///     }
 /// }
 /// ```
 pub trait SupervisedTask: Send + 'static {
     /// Runs the task until completion or failure.
+    ///
+    /// Mutations to `&mut self` are **not** preserved across restarts.
+    /// See the [trait-level docs](SupervisedTask) for details.
     fn run(&mut self) -> impl Future<Output = TaskResult> + Send;
 }
 
-// ---- Internal dyn-compatible wrapper ----
-
-/// Object-safe version of `SupervisedTask` used internally for dynamic dispatch.
-/// Users never see or implement this trait directly.
+/// Dyn-compatible wrapper for `SupervisedTask`. Not user-facing.
 pub(crate) trait DynSupervisedTask: Send + 'static {
     fn run_boxed(&mut self) -> Pin<Box<dyn Future<Output = TaskResult> + Send + '_>>;
     fn clone_box(&self) -> Box<dyn DynSupervisedTask>;
@@ -55,18 +74,12 @@ where
 
 pub(crate) type DynTask = Box<dyn DynSupervisedTask>;
 
-/// Represents the current state of a supervised task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
-    /// Task has been created but not yet started.
     Created,
-    /// Task is running and healthy.
     Healthy,
-    /// Task has failed and is pending restart.
     Failed,
-    /// Task has completed successfully.
     Completed,
-    /// Task has failed too many times and is terminated.
     Dead,
 }
 
@@ -113,8 +126,6 @@ pub(crate) struct TaskHandle {
 }
 
 impl TaskHandle {
-    /// Creates a `TaskHandle` from a boxed task.
-    /// Configuration is set later by the builder at `build()` time.
     pub(crate) fn new(task: DynTask) -> Self {
         Self {
             status: TaskStatus::Created,
@@ -123,24 +134,23 @@ impl TaskHandle {
             restart_attempts: 0,
             healthy_since: None,
             cancellation_token: None,
+            // Defaults — overwritten by the builder at build() time.
             max_restart_attempts: None,
             base_restart_delay: Duration::from_secs(1),
             max_backoff_exponent: 5,
         }
     }
 
-    /// Creates a new `TaskHandle` from a concrete task type.
     pub(crate) fn from_task<T: SupervisedTask + Clone>(task: T) -> Self {
         Self::new(Box::new(task))
     }
 
-    /// Calculates the restart delay using exponential backoff.
+    /// Delay = base_restart_delay * 2^min(attempts, max_backoff_exponent).
     pub(crate) fn restart_delay(&self) -> Duration {
         let factor = 2u32.saturating_pow(self.restart_attempts.min(self.max_backoff_exponent));
         self.base_restart_delay.saturating_mul(factor)
     }
 
-    /// Checks if the task has exceeded its maximum restart attempts.
     pub(crate) const fn has_exceeded_max_retries(&self) -> bool {
         if let Some(max_restart_attempts) = self.max_restart_attempts {
             self.restart_attempts >= max_restart_attempts
@@ -149,12 +159,10 @@ impl TaskHandle {
         }
     }
 
-    /// Updates the task's status.
     pub(crate) fn mark(&mut self, status: TaskStatus) {
         self.status = status;
     }
 
-    /// Cleans up the task by cancelling its token and aborting the join handle.
     pub(crate) fn clean(&mut self) {
         if let Some(token) = self.cancellation_token.take() {
             token.cancel();

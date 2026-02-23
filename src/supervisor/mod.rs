@@ -27,16 +27,13 @@ pub enum SupervisorError {
     },
 }
 
-/// Internal messages sent from tasks to the supervisor.
 #[derive(Debug)]
 pub(crate) enum SupervisedTaskMessage {
-    /// Sent when a task completes, either successfully or with a failure.
     Completed(Arc<str>, TaskResult),
-    /// Sent when a shutdown signal is requested by the user.
     Shutdown,
 }
 
-/// A pending restart, ordered by deadline (earliest first).
+/// Pending restart ordered by deadline (earliest first).
 struct PendingRestart {
     deadline: tokio::time::Instant,
     task_name: Arc<str>,
@@ -58,35 +55,26 @@ impl PartialOrd for PendingRestart {
 
 impl Ord for PendingRestart {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Reverse ordering so BinaryHeap (max-heap) pops the earliest deadline first.
+        // Reversed: BinaryHeap is a max-heap, we want earliest deadline first.
         other.deadline.cmp(&self.deadline)
     }
 }
 
-/// Manages a set of tasks, ensuring they remain operational through restarts.
-///
-/// The `Supervisor` spawns each task with monitoring to detect failures.
-/// If a task fails, it is restarted with an exponential backoff.
-/// User commands such as adding, restarting, or killing tasks are supported via the `SupervisorHandle`.
 pub struct Supervisor {
     pub(crate) tasks: HashMap<Arc<str>, TaskHandle>,
-    // Durations for tasks lifecycle
     pub(crate) health_check_interval: Duration,
     pub(crate) base_restart_delay: Duration,
     pub(crate) task_is_stable_after: Duration,
     pub(crate) max_restart_attempts: Option<u32>,
     pub(crate) max_backoff_exponent: u32,
     pub(crate) max_dead_tasks_percentage_threshold: Option<f64>,
-    // Channels between the User & the Supervisor
     pub(crate) external_tx: mpsc::UnboundedSender<SupervisorMessage>,
     pub(crate) external_rx: mpsc::UnboundedReceiver<SupervisorMessage>,
-    // Internal channel: tasks -> supervisor
     pub(crate) internal_tx: mpsc::UnboundedSender<SupervisedTaskMessage>,
     pub(crate) internal_rx: mpsc::UnboundedReceiver<SupervisedTaskMessage>,
 }
 
 impl Supervisor {
-    /// Runs the supervisor, consuming it and returning a handle for external control.
     pub fn run(self) -> SupervisorHandle {
         let user_tx = self.external_tx.clone();
         let handle = tokio::spawn(async move { self.run_and_supervise().await });
@@ -105,13 +93,11 @@ impl Supervisor {
         }
     }
 
-    /// Main supervision loop.
     async fn supervise_all_tasks(&mut self) -> Result<(), SupervisorError> {
         let mut health_check_ticker = interval(self.health_check_interval);
         let mut pending_restarts: BinaryHeap<PendingRestart> = BinaryHeap::new();
 
         loop {
-            // Compute the sleep for the next pending restart (if any).
             let next_restart = async {
                 match pending_restarts.peek() {
                     Some(pr) => tokio::time::sleep_until(pr.deadline).await,
@@ -142,14 +128,13 @@ impl Supervisor {
                     self.handle_user_message(user_msg, &mut pending_restarts);
                 },
                 _ = next_restart => {
-                    // Pop and execute the restart whose deadline has arrived.
                     if let Some(pr) = pending_restarts.pop() {
                         self.restart_task(&pr.task_name);
                     }
                 },
                 _ = health_check_ticker.tick() => {
                     #[cfg(feature = "with_tracing")]
-                    debug!("Supervisor checking health of all tasks");
+                    debug!("Health check tick");
                     self.check_all_health(&mut pending_restarts);
                     self.check_dead_tasks_threshold()?;
                 }
@@ -157,7 +142,6 @@ impl Supervisor {
         }
     }
 
-    /// Processes user commands received via the `SupervisorHandle`.
     fn handle_user_message(
         &mut self,
         msg: SupervisorMessage,
@@ -167,10 +151,9 @@ impl Supervisor {
             SupervisorMessage::AddTask(task_name, task_dyn) => {
                 let key: Arc<str> = Arc::from(task_name);
 
-                // TODO: This branch should return an error
                 if self.tasks.contains_key(&key) {
                     #[cfg(feature = "with_tracing")]
-                    warn!("Attempted to add task '{}' but it already exists", key);
+                    warn!("Task '{}' already exists, ignoring add", key);
                     return;
                 }
 
@@ -203,10 +186,6 @@ impl Supervisor {
             SupervisorMessage::GetTaskStatus(task_name, sender) => {
                 let key: Arc<str> = Arc::from(task_name);
                 let status = self.tasks.get(&key).map(|handle| handle.status);
-
-                #[cfg(feature = "with_tracing")]
-                debug!("Status query for task '{}': {:?}", key, status);
-
                 let _ = sender.send(status);
             }
             SupervisorMessage::GetAllTaskStatuses(sender) => {
@@ -235,7 +214,6 @@ impl Supervisor {
         }
     }
 
-    /// Starts a task, spawning a single tokio task that runs it and reports completion.
     fn start_task(&mut self, task_name: &Arc<str>) {
         let Some(task_handle) = self.tasks.get_mut(task_name) else {
             return;
@@ -246,6 +224,7 @@ impl Supervisor {
         let token = CancellationToken::new();
         task_handle.cancellation_token = Some(token.clone());
 
+        // Cloned from the stored original — owned fields reset, Arc fields shared.
         let mut task_instance = task_handle.task.clone_box();
         let internal_tx = self.internal_tx.clone();
         let name = Arc::clone(task_name);
@@ -262,7 +241,6 @@ impl Supervisor {
         task_handle.join_handle = Some(join_handle);
     }
 
-    /// Restarts a task after cleaning up its previous execution.
     fn restart_task(&mut self, task_name: &Arc<str>) {
         if let Some(task_handle) = self.tasks.get_mut(task_name) {
             task_handle.clean();
@@ -272,10 +250,6 @@ impl Supervisor {
 
     fn check_all_health(&mut self, pending_restarts: &mut BinaryHeap<PendingRestart>) {
         let now = Instant::now();
-
-        // First pass: mark failed tasks and collect their names.
-        // We collect into a fixed-capacity buffer to avoid per-tick heap allocation
-        // in the common case where few (or zero) tasks need restart.
         let mut failed_names: Vec<Arc<str>> = Vec::new();
 
         for (task_name, task_handle) in self.tasks.iter_mut() {
@@ -294,8 +268,7 @@ impl Supervisor {
                     task_handle.mark(TaskStatus::Failed);
                     failed_names.push(Arc::clone(task_name));
                 } else {
-                    // Task is running. Check for stability — reset restart counter
-                    // once a task has been healthy long enough.
+                    // Stability check: reset restart counter after sustained health.
                     if let Some(healthy_since) = task_handle.healthy_since {
                         if now.duration_since(healthy_since) > self.task_is_stable_after
                             && task_handle.restart_attempts > 0
@@ -333,7 +306,7 @@ impl Supervisor {
     ) {
         let Some(task_handle) = self.tasks.get_mut(task_name) else {
             #[cfg(feature = "with_tracing")]
-            warn!("Received completion for non-existent task: {}", task_name);
+            warn!("Completion for unknown task: {}", task_name);
             return;
         };
 
@@ -343,13 +316,12 @@ impl Supervisor {
             Ok(()) => {
                 #[cfg(feature = "with_tracing")]
                 info!("Task '{}' completed successfully", task_name);
-
                 task_handle.mark(TaskStatus::Completed);
             }
             #[allow(unused_variables)]
             Err(ref e) => {
                 #[cfg(feature = "with_tracing")]
-                error!("Task '{}' failed with error: {:?}", task_name, e);
+                error!("Task '{}' failed: {:?}", task_name, e);
 
                 task_handle.mark(TaskStatus::Failed);
                 self.schedule_restart_or_kill(task_name, pending_restarts);
@@ -357,8 +329,7 @@ impl Supervisor {
         }
     }
 
-    /// Shared logic for scheduling a restart with backoff, or marking the task dead
-    /// if max retries have been exceeded.
+    /// Schedules a restart with backoff, or marks the task dead if retries exhausted.
     fn schedule_restart_or_kill(
         &mut self,
         task_name: &Arc<str>,
@@ -414,7 +385,6 @@ impl Supervisor {
             return Ok(());
         }
 
-        // Single-pass: count dead tasks.
         let dead_task_count = self
             .tasks
             .values()
@@ -436,7 +406,6 @@ impl Supervisor {
             total_task_count
         );
 
-        // Kill all remaining non-dead/non-completed tasks
         #[allow(unused_variables)]
         for (task_name, task_handle) in self.tasks.iter_mut() {
             if task_handle.status != TaskStatus::Dead && task_handle.status != TaskStatus::Completed

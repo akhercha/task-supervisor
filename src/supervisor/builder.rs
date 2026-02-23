@@ -4,11 +4,10 @@ use tokio::sync::mpsc;
 
 use crate::{task::TaskHandle, SupervisedTask, Supervisor};
 
-/// Builds a `Supervisor` instance with configurable parameters.
+/// Builds a `Supervisor` with configurable parameters.
 ///
-/// Configuration methods can be called in any order. Task restart settings
-/// are applied to all tasks uniformly at `build()` time, regardless of when
-/// `with_task()` was called.
+/// `with_task()` and configuration methods can be called in any order;
+/// task restart settings are applied uniformly at `build()` time.
 pub struct SupervisorBuilder {
     tasks: HashMap<Arc<str>, TaskHandle>,
     health_check_interval: Duration,
@@ -20,7 +19,6 @@ pub struct SupervisorBuilder {
 }
 
 impl SupervisorBuilder {
-    /// Creates a new builder with default configuration values.
     pub fn new() -> Self {
         Self {
             tasks: HashMap::new(),
@@ -33,73 +31,53 @@ impl SupervisorBuilder {
         }
     }
 
-    /// Adds a task to the supervisor with the specified name.
-    ///
-    /// Task restart configuration is applied at `build()` time, so the
-    /// order of `with_task()` vs configuration methods does not matter.
     pub fn with_task(mut self, name: &str, task: impl SupervisedTask + Clone) -> Self {
         let handle = TaskHandle::from_task(task);
         self.tasks.insert(Arc::from(name), handle);
         self
     }
 
-    /// Sets the maximum exponent used in exponential backoff.
-    ///
-    /// The restart delay is calculated as `base_restart_delay * 2^min(attempt, max_backoff_exponent)`.
-    /// For example, with a base delay of 1s and exponent cap of 5, the maximum delay is 32s.
+    /// Caps the exponent in the backoff formula:
+    /// `delay = base_restart_delay * 2^min(attempt, max_backoff_exponent)`.
     pub fn with_max_backoff_exponent(mut self, exponent: u32) -> Self {
         self.max_backoff_exponent = exponent;
         self
     }
 
-    /// Sets the interval between health checks.
     pub fn with_health_check_interval(mut self, interval: Duration) -> Self {
         self.health_check_interval = interval;
         self
     }
 
-    /// Sets the maximum number of restart attempts for tasks.
     pub fn with_max_restart_attempts(mut self, attempts: u32) -> Self {
         self.max_restart_attempts = Some(attempts);
         self
     }
 
-    /// Disables the restart limit, allowing tasks to restart indefinitely.
     pub fn with_unlimited_restarts(mut self) -> Self {
         self.max_restart_attempts = None;
         self
     }
 
-    /// Sets the base delay for task restarts, used in exponential backoff.
     pub fn with_base_restart_delay(mut self, delay: Duration) -> Self {
         self.base_restart_delay = delay;
         self
     }
 
-    /// Sets the delay after which a task is considered stable and healthy.
-    /// When a task is considered stable, its restarts are reset to zero.
+    /// Once a task has been healthy for this long, its restart counter resets to zero.
     pub fn with_task_being_stable_after(mut self, delay: Duration) -> Self {
         self.task_stable_after_delay = delay;
         self
     }
 
-    /// Sets the threshold for the percentage of dead tasks that will trigger a supervisor shutdown.
-    ///
-    /// The `threshold_percentage` should be a value between 0.0 (0%) and 1.0 (100%).
-    /// If the percentage of dead tasks exceeds this value, the supervisor will shut down
-    /// and return an error.
+    /// Shuts down the supervisor if the fraction of dead tasks exceeds
+    /// `threshold_percentage` (0.0 – 1.0). `None` disables the check.
     pub fn with_dead_tasks_threshold(mut self, threshold_percentage: Option<f64>) -> Self {
         self.max_dead_tasks_percentage_threshold = threshold_percentage.map(|t| t.clamp(0.0, 1.0));
         self
     }
 
-    /// Constructs the `Supervisor` with the configured settings.
-    ///
-    /// Applies restart configuration (max attempts, base delay, backoff exponent)
-    /// to all registered tasks.
     pub fn build(mut self) -> Supervisor {
-        // Apply configuration to all tasks — this fixes the ordering issue where
-        // tasks added before config methods would get stale defaults.
         for task_handle in self.tasks.values_mut() {
             task_handle.max_restart_attempts = self.max_restart_attempts;
             task_handle.base_restart_delay = self.base_restart_delay;
