@@ -12,6 +12,13 @@ It watches each task, restarts it if it crashes or stops responding, and lets yo
 cargo add task-supervisor
 ```
 
+## Features
+
+| Feature   | Effect                                       |
+| --------- | -------------------------------------------- |
+| `anyhow`  | Uses `anyhow::Error` as the task error type. |
+| `tracing` | Logs supervisor activity via `tracing`.      |
+
 ## Quick example
 
 ```rust
@@ -21,7 +28,7 @@ use task_supervisor::{SupervisorBuilder, SupervisedTask, TaskResult};
 struct Printer;
 
 impl SupervisedTask for Printer {
-    async fn run(&mut self) -> TaskResult {w
+        async fn run(&mut self) -> TaskResult {
         println!("hello");
         Ok(())
     }
