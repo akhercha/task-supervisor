@@ -28,13 +28,13 @@ impl SupervisedTask for Printer {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let supervisor = SupervisorBuilder::default()
         .with_task("printer", Printer)
         .build()
         .run();
 
-    supervisor.wait().await?;   // wait until every task finishes or is killed
+    supervisor.wait().await.unwrap();   // wait until every task finishes or is killed
     Ok(())
 }
 ```

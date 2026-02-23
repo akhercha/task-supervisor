@@ -7,7 +7,7 @@ use std::{
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-pub type TaskError = anyhow::Error;
+pub type TaskError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type TaskResult = Result<(), TaskError>;
 
 /// The trait users implement for tasks managed by the supervisor.

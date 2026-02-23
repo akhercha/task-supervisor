@@ -1,7 +1,8 @@
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{sync::Arc, time::Duration};
-use task_supervisor::{SupervisorBuilder, TaskStatus};
+use task_supervisor::{SupervisedTask, SupervisorBuilder, TaskResult, TaskStatus};
 use tokio::time::pause;
 
 use common::{CompletingTask, FailingTask, ImmediateCompleteTask, ImmediateFailTask};
@@ -111,4 +112,57 @@ async fn test_unlimited_restarts() {
 
     assert_ne!(status, TaskStatus::Dead);
     assert!(task.run_count.load(std::sync::atomic::Ordering::SeqCst) > 5);
+}
+
+#[derive(Clone)]
+struct AnyhowTask {
+    run_count: Arc<AtomicUsize>,
+}
+
+impl AnyhowTask {
+    /// Simulates a fallible helper that returns `anyhow::Result`.
+    fn fallible_operation(&self) -> anyhow::Result<()> {
+        anyhow::bail!("anyhow error from inner function");
+    }
+}
+
+impl SupervisedTask for AnyhowTask {
+    async fn run(&mut self) -> TaskResult {
+        self.run_count.fetch_add(1, Ordering::SeqCst);
+        self.fallible_operation()?;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_anyhow_error_bubbles_up() {
+    pause();
+    let run_count = Arc::new(AtomicUsize::new(0));
+
+    let handle = SupervisorBuilder::new()
+        .with_max_restart_attempts(2)
+        .with_base_restart_delay(Duration::from_millis(50))
+        .with_max_backoff_exponent(0)
+        .build()
+        .run();
+
+    handle
+        .add_task(
+            "anyhow_task",
+            AnyhowTask {
+                run_count: run_count.clone(),
+            },
+        )
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let status = handle
+        .get_task_status("anyhow_task")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, TaskStatus::Dead);
+    // 1 initial + 2 restarts = 3 total runs.
+    assert_eq!(run_count.load(Ordering::SeqCst), 3);
 }

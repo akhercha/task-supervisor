@@ -33,7 +33,7 @@ impl SupervisedTask for StatefulTask {
         self.shared_counter.fetch_add(1, Ordering::SeqCst);
 
         // Fail so we get restarted.
-        Err(anyhow::anyhow!("intentional failure"))
+        Err("intentional failure".into())
     }
 }
 

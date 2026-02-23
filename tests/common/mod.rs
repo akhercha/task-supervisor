@@ -28,7 +28,7 @@ pub struct FailingTask {
 impl SupervisedTask for FailingTask {
     async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
-        Err(anyhow::anyhow!("Task failed!"))
+        Err("Task failed!".into())
     }
 }
 
@@ -66,6 +66,6 @@ pub struct ImmediateFailTask;
 
 impl SupervisedTask for ImmediateFailTask {
     async fn run(&mut self) -> TaskResult {
-        Err(anyhow::anyhow!("Immediate failure!"))
+        Err("Immediate failure!".into())
     }
 }
