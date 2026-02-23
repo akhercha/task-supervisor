@@ -21,7 +21,7 @@ use task_supervisor::{SupervisorBuilder, SupervisedTask, TaskResult};
 struct Printer;
 
 impl SupervisedTask for Printer {
-    async fn run(&mut self) -> TaskResult {
+    async fn run(&mut self) -> TaskResult {w
         println!("hello");
         Ok(())
     }

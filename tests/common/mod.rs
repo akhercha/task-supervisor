@@ -25,10 +25,11 @@ pub struct FailingTask {
     pub run_count: Arc<AtomicUsize>,
 }
 
+#[allow(clippy::useless_conversion)]
 impl SupervisedTask for FailingTask {
     async fn run(&mut self) -> TaskResult {
         self.run_count.fetch_add(1, Ordering::SeqCst);
-        Err("Task failed!".into())
+        Err(anyhow::anyhow!("Task failed!").into())
     }
 }
 
@@ -64,8 +65,9 @@ impl SupervisedTask for ImmediateCompleteTask {
 #[derive(Clone)]
 pub struct ImmediateFailTask;
 
+#[allow(clippy::useless_conversion)]
 impl SupervisedTask for ImmediateFailTask {
     async fn run(&mut self) -> TaskResult {
-        Err("Immediate failure!".into())
+        Err(anyhow::anyhow!("Immediate failure!").into())
     }
 }

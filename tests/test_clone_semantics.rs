@@ -18,6 +18,7 @@ struct StatefulTask {
     pub observed_owned_values: Arc<std::sync::Mutex<Vec<u64>>>,
 }
 
+#[allow(clippy::useless_conversion)]
 impl SupervisedTask for StatefulTask {
     async fn run(&mut self) -> TaskResult {
         // Record what owned_counter was when this run started.
@@ -33,7 +34,7 @@ impl SupervisedTask for StatefulTask {
         self.shared_counter.fetch_add(1, Ordering::SeqCst);
 
         // Fail so we get restarted.
-        Err("intentional failure".into())
+        Err(anyhow::anyhow!("intentional failure").into())
     }
 }
 

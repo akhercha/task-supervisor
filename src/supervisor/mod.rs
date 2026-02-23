@@ -10,7 +10,7 @@ use std::{
 use tokio::{sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
 
-#[cfg(feature = "with_tracing")]
+#[cfg(feature = "tracing")]
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -110,12 +110,12 @@ impl Supervisor {
                 Some(internal_msg) = self.internal_rx.recv() => {
                     match internal_msg {
                         SupervisedTaskMessage::Shutdown => {
-                            #[cfg(feature = "with_tracing")]
+                            #[cfg(feature = "tracing")]
                             info!("Supervisor received shutdown signal");
                             return Ok(());
                         }
                         SupervisedTaskMessage::Completed(task_name, outcome) => {
-                            #[cfg(feature = "with_tracing")]
+                            #[cfg(feature = "tracing")]
                             match &outcome {
                                 Ok(()) => info!("Task '{}' completed successfully", task_name),
                                 Err(e) => warn!("Task '{}' completed with error: {e}", task_name),
@@ -133,7 +133,7 @@ impl Supervisor {
                     }
                 },
                 _ = health_check_ticker.tick() => {
-                    #[cfg(feature = "with_tracing")]
+                    #[cfg(feature = "tracing")]
                     debug!("Health check tick");
                     self.check_all_health(&mut pending_restarts);
                     self.check_dead_tasks_threshold()?;
@@ -152,7 +152,7 @@ impl Supervisor {
                 let key: Arc<str> = Arc::from(task_name);
 
                 if self.tasks.contains_key(&key) {
-                    #[cfg(feature = "with_tracing")]
+                    #[cfg(feature = "tracing")]
                     warn!("Task '{}' already exists, ignoring add", key);
                     return;
                 }
@@ -167,7 +167,7 @@ impl Supervisor {
             }
             SupervisorMessage::RestartTask(task_name) => {
                 let key: Arc<str> = Arc::from(task_name);
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 info!("User requested restart for task: {}", key);
                 self.restart_task(&key);
             }
@@ -179,7 +179,7 @@ impl Supervisor {
                         task_handle.clean();
                     }
                 } else {
-                    #[cfg(feature = "with_tracing")]
+                    #[cfg(feature = "tracing")]
                     warn!("Attempted to kill non-existent task: {}", key);
                 }
             }
@@ -197,7 +197,7 @@ impl Supervisor {
                 let _ = sender.send(statuses);
             }
             SupervisorMessage::Shutdown => {
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 info!("User requested supervisor shutdown");
 
                 for (_, task_handle) in self.tasks.iter_mut() {
@@ -259,7 +259,7 @@ impl Supervisor {
 
             if let Some(handle) = &task_handle.join_handle {
                 if handle.is_finished() {
-                    #[cfg(feature = "with_tracing")]
+                    #[cfg(feature = "tracing")]
                     warn!(
                         "Task '{}' unexpectedly finished, marking as failed",
                         task_name
@@ -273,7 +273,7 @@ impl Supervisor {
                         if now.duration_since(healthy_since) > self.task_is_stable_after
                             && task_handle.restart_attempts > 0
                         {
-                            #[cfg(feature = "with_tracing")]
+                            #[cfg(feature = "tracing")]
                             info!(
                                 "Task '{}' is now stable, resetting restart attempts",
                                 task_name
@@ -285,7 +285,7 @@ impl Supervisor {
                     }
                 }
             } else {
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 error!("Task '{}' has no join handle, marking as failed", task_name);
 
                 task_handle.mark(TaskStatus::Failed);
@@ -305,7 +305,7 @@ impl Supervisor {
         pending_restarts: &mut BinaryHeap<PendingRestart>,
     ) {
         let Some(task_handle) = self.tasks.get_mut(task_name) else {
-            #[cfg(feature = "with_tracing")]
+            #[cfg(feature = "tracing")]
             warn!("Completion for unknown task: {}", task_name);
             return;
         };
@@ -314,13 +314,13 @@ impl Supervisor {
 
         match outcome {
             Ok(()) => {
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 info!("Task '{}' completed successfully", task_name);
                 task_handle.mark(TaskStatus::Completed);
             }
             #[allow(unused_variables)]
             Err(ref e) => {
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 error!("Task '{}' failed: {:?}", task_name, e);
 
                 task_handle.mark(TaskStatus::Failed);
@@ -340,7 +340,7 @@ impl Supervisor {
         };
 
         if task_handle.has_exceeded_max_retries() {
-            #[cfg(feature = "with_tracing")]
+            #[cfg(feature = "tracing")]
             error!(
                 "Task '{}' exceeded max restart attempts ({:?}), marking as dead",
                 task_name,
@@ -357,7 +357,7 @@ impl Supervisor {
         task_handle.restart_attempts = task_handle.restart_attempts.saturating_add(1);
         let restart_delay = task_handle.restart_delay();
 
-        #[cfg(feature = "with_tracing")]
+        #[cfg(feature = "tracing")]
         info!(
             "Scheduling restart for task '{}' in {:?} (attempt {}/{})",
             task_name,
@@ -397,7 +397,7 @@ impl Supervisor {
             return Ok(());
         }
 
-        #[cfg(feature = "with_tracing")]
+        #[cfg(feature = "tracing")]
         error!(
             "Dead tasks threshold exceeded: {:.2}% > {:.2}% ({}/{} tasks dead)",
             current_dead_percentage * 100.0,
@@ -410,7 +410,7 @@ impl Supervisor {
         for (task_name, task_handle) in self.tasks.iter_mut() {
             if task_handle.status != TaskStatus::Dead && task_handle.status != TaskStatus::Completed
             {
-                #[cfg(feature = "with_tracing")]
+                #[cfg(feature = "tracing")]
                 debug!("Killing task '{}' due to threshold breach", task_name);
 
                 task_handle.clean();
