@@ -4,8 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+const RESTART_DELAY_JITTER_PERCENT: u64 = 10;
 
 #[cfg(feature = "anyhow")]
 pub type TaskError = anyhow::Error;
@@ -149,10 +152,18 @@ impl TaskHandle {
         Self::new(Box::new(task))
     }
 
-    /// Delay = base_restart_delay * 2^min(attempts, max_backoff_exponent).
+    /// Delay = base_restart_delay * 2^min(attempts, max_backoff_exponent), +/-10% jitter
+    /// to prevent thundering herd when many tasks fail simultaneously.
     pub(crate) fn restart_delay(&self) -> Duration {
         let factor = 2u32.saturating_pow(self.restart_attempts.min(self.max_backoff_exponent));
-        self.base_restart_delay.saturating_mul(factor)
+        let base = self.base_restart_delay.saturating_mul(factor);
+        let base_millis = base.as_millis() as u64;
+        let jitter_range = base_millis / RESTART_DELAY_JITTER_PERCENT;
+        if jitter_range == 0 {
+            return base;
+        }
+        let jitter = rand::thread_rng().gen_range(0..=jitter_range * 2);
+        Duration::from_millis(base_millis - jitter_range + jitter)
     }
 
     pub(crate) const fn has_exceeded_max_retries(&self) -> bool {
