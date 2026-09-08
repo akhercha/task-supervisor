@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     handle::{Message, SupervisorHandle, SupervisorHandleError},
-    task::{panic_message, Reply, Slot, TaskResult, TaskStatus},
+    task::{panic_message, Slot, TaskResult, TaskStatus},
 };
 
 /// Why the supervisor exited abnormally. Returned by
@@ -247,8 +247,7 @@ impl Supervisor {
             } else {
                 slot.status = TaskStatus::Dead;
             }
-            let waiters: Vec<Reply<()>> = slot.stop_waiters.drain(..).collect();
-            for waiter in waiters {
+            for waiter in std::mem::take(&mut slot.stop_waiters) {
                 let _ = waiter.send(Ok(()));
             }
             return self.check_threshold();
