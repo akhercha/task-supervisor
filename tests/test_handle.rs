@@ -9,7 +9,7 @@ use tokio::time::{pause, Instant};
 
 fn builder() -> SupervisorBuilder {
     SupervisorBuilder::new()
-        .with_max_restart_attempts(5)
+        .with_restart_limit(5, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(100))
         .with_max_restart_delay(Duration::from_millis(100))
         .with_stop_timeout(Duration::from_millis(200))
@@ -132,7 +132,7 @@ async fn kill_during_backoff_stays_dead() {
 async fn restart_during_backoff_does_not_double_run() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(5)
+        .with_restart_limit(5, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_secs(1))
         .with_max_restart_delay(Duration::from_secs(1))
         .spawn();
@@ -156,7 +156,7 @@ async fn restart_during_backoff_does_not_double_run() {
 async fn manual_restart_resets_restart_budget() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(1)
+        .with_restart_limit(1, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(100))
         .spawn();
     let task = Failing::default();

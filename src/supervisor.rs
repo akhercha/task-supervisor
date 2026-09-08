@@ -49,10 +49,10 @@ pub(crate) type Outcome = Result<(), SupervisorError>;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Config {
-    pub(crate) max_restart_attempts: Option<u32>,
+    pub(crate) max_restarts: Option<u32>,
+    pub(crate) restart_window: Duration,
     pub(crate) base_restart_delay: Duration,
     pub(crate) max_restart_delay: Duration,
-    pub(crate) stable_after: Duration,
     pub(crate) dead_tasks_threshold: Option<f64>,
     pub(crate) stop_timeout: Duration,
 }
@@ -174,7 +174,7 @@ impl Supervisor {
                     return ControlFlow::Continue(());
                 };
                 info!(task = %name, "restart requested");
-                slot.restart_attempts = 0;
+                slot.restarts.clear();
                 match slot.status {
                     TaskStatus::Running | TaskStatus::Stopping => {
                         slot.request_stop(true);
@@ -259,32 +259,49 @@ impl Supervisor {
             return ControlFlow::Continue(());
         };
 
-        if slot.started_at.elapsed() >= self.config.stable_after {
-            slot.restart_attempts = 0;
+        let now = Instant::now();
+        let window = self.config.restart_window;
+        while slot
+            .restarts
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= window)
+        {
+            slot.restarts.pop_front();
         }
+        let recent = slot.restarts.len();
         if self
             .config
-            .max_restart_attempts
-            .is_some_and(|max| slot.restart_attempts >= max)
+            .max_restarts
+            .is_some_and(|max| recent >= max as usize)
         {
-            error!(task = name, error = %err, "failed; restart budget exhausted, task is dead");
+            error!(
+                task = name,
+                error = %err,
+                restarts = recent,
+                window = ?window,
+                "failed; restart limit reached, task is dead"
+            );
             slot.status = TaskStatus::Dead;
             return self.check_threshold();
         }
 
         // ponytail: no jitter; add if many tasks share a failing dependency.
-        let factor = 2u32.saturating_pow(slot.restart_attempts);
+        let factor = 2u32.saturating_pow(recent.min(31) as u32);
         let delay = self
             .config
             .base_restart_delay
             .saturating_mul(factor)
             .min(self.config.max_restart_delay);
-        slot.restart_attempts += 1;
+        slot.restarts.push_back(now);
+        // Unlimited mode: the exponent saturates anyway, keep the deque bounded.
+        if slot.restarts.len() > 32 {
+            slot.restarts.pop_front();
+        }
         slot.status = TaskStatus::Restarting;
         warn!(
             task = name,
             error = %err,
-            attempt = slot.restart_attempts,
+            restarts_in_window = recent + 1,
             delay = ?delay,
             "failed; restart scheduled"
         );
@@ -384,7 +401,6 @@ fn start_run(slot: &mut Slot, config: &Config, runs: &mut JoinSet<RunOutput>) {
     slot.status = TaskStatus::Running;
     slot.cancel = Some(cancel);
     slot.generation += 1;
-    slot.started_at = Instant::now();
     slot.restart_after_stop = false;
     debug!(task = %slot.name, generation = slot.generation, "started");
 }

@@ -60,7 +60,7 @@ See [`examples/simple.rs`](examples/simple.rs) for restarts, runtime control and
   kill / restart / shutdown on a Running task → Stopping → Dead (or a new Running)
 ```
 
-* A failed run is restarted after `base_restart_delay * 2^n`, capped at `max_restart_delay`, up to `max_restart_attempts` times. A run that lasted at least `stable_after` resets that budget when it fails.
+* A failed run is restarted after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts inside the last `restart_limit` window. A task that would exceed the limit becomes `Dead`.
 * Stopping a task cancels its `CancellationToken`; the run then has `stop_timeout` to return before its future is dropped. Tasks that need no cleanup can ignore the token.
 * `run` receives a fresh **clone** of the registered task on every start. Owned fields reset; `Arc` fields are shared across runs.
 * Dropping the last `SupervisorHandle` shuts the supervisor down gracefully.
@@ -69,10 +69,9 @@ See [`examples/simple.rs`](examples/simple.rs) for restarts, runtime control and
 
 | `SupervisorBuilder` method          | Default  | Meaning                                                      |
 | ----------------------------------- | -------- | ------------------------------------------------------------ |
-| `with_max_restart_attempts(n)`      | 5        | Restarts before a task is `Dead`; `with_unlimited_restarts()` |
-| `with_base_restart_delay(d)`        | 1s       | Delay before the first restart, doubled each time            |
+| `with_restart_limit(n, window)`     | 5 in 60s | Restarts allowed within any `window` before a task is `Dead`; `with_unlimited_restarts()` |
+| `with_base_restart_delay(d)`        | 1s       | Delay before the first restart in a window, doubled each time |
 | `with_max_restart_delay(d)`         | 30s      | Cap on the restart delay                                     |
-| `with_stable_after(d)`              | 60s      | Run length that resets the restart budget                    |
 | `with_dead_tasks_threshold(f)`      | disabled | Shut down once a task is dead and `dead / total >= f` (`0.0` = any, `1.0` = all; kills count) |
 | `with_stop_timeout(d)`              | 5s       | Grace period after cancellation before a run is dropped (kill, restart, shutdown) |
 
@@ -108,7 +107,7 @@ Supervisor activity is emitted through [`tracing`](https://docs.rs/tracing) (`in
 * `SupervisorHandleError::{SendError, RecvError}` → `Closed`, plus `TaskAlreadyExists` and `TaskNotFound`.
 * `SupervisorError::TooManyDeadTasks { current_percentage, threshold }` → `{ dead, total, threshold }`; new variants `Panicked` and `Aborted`.
 * `TaskStatus`: `Healthy` → `Running`, `Failed` → `Restarting`, `Created` removed, `Stopping` added; `is_healthy`/`is_dead`/`is_restarting`/`has_completed` removed (compare variants).
-* `with_health_check_interval` removed (no polling anymore); `with_max_backoff_exponent(n)` → `with_max_restart_delay(base * 2^n)`; `with_task_being_stable_after` → `with_stable_after`; `with_dead_tasks_threshold(Some(f))` → `with_dead_tasks_threshold(f)`, now triggers on `>=` once at least one task is dead.
+* `with_health_check_interval` removed (no polling anymore); `with_max_restart_attempts(n)` + `with_task_being_stable_after(d)` → `with_restart_limit(n, window)` (Erlang/systemd model: at most `n` restarts in any `window`); `with_max_backoff_exponent(n)` → `with_max_restart_delay(base * 2^n)`; `with_dead_tasks_threshold(Some(f))` → `with_dead_tasks_threshold(f)`, now triggers on `>=` once at least one task is dead.
 * `anyhow` and `tracing` features removed: `?` on `anyhow::Error` works without a feature; `tracing` is always on.
 * Dropping a handle clone no longer shuts the supervisor down; only the last one does.
 * Minimum tokio: 1.21 (`JoinSet`).

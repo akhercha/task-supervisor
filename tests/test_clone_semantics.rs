@@ -40,7 +40,7 @@ async fn owned_fields_reset_and_shared_state_persists_across_restarts() {
         runs_seeing_original_owned_value: Arc::default(),
     };
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(3)
+        .with_restart_limit(3, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(50))
         .with_task("stateful", task.clone())
         .spawn();
@@ -75,7 +75,7 @@ async fn anyhow_errors_convert_with_question_mark() {
 
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(0)
+        .with_restart_limit(0, Duration::from_secs(60))
         .with_task("t", AnyhowTask)
         .spawn();
 

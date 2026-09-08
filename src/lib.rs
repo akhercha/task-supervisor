@@ -52,8 +52,8 @@
 //! ```
 //!
 //! * A failed run is restarted after `base_restart_delay * 2^n`, capped at
-//!   `max_restart_delay`, for up to `max_restart_attempts` restarts. A run that
-//!   lasted at least `stable_after` resets that budget when it fails.
+//!   `max_restart_delay`, where `n` is the number of restarts inside the last
+//!   `restart_limit` window. Exceeding the limit makes the task `Dead`.
 //! * Stopping a task cancels its [`CancellationToken`]; the run then has
 //!   `stop_timeout` to return before its future is dropped.
 //! * `run` receives a fresh clone of the registered task every time; see

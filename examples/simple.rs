@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let handle = SupervisorBuilder::new()
         .with_base_restart_delay(Duration::from_secs(1))
-        .with_max_restart_attempts(2)
+        .with_restart_limit(2, Duration::from_secs(60))
         .with_task("a", Ticker { label: "a" })
         .spawn();
 

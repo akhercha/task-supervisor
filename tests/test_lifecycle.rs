@@ -13,7 +13,7 @@ use common::{runs, sleep_ms, Completes, Cooperative, Failing, Panicking};
 
 fn builder() -> SupervisorBuilder {
     SupervisorBuilder::new()
-        .with_max_restart_attempts(3)
+        .with_restart_limit(3, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(100))
         .with_max_restart_delay(Duration::from_millis(100))
 }
@@ -59,7 +59,7 @@ async fn failing_task_restarts_with_backoff_then_dies() {
 async fn backoff_doubles_and_is_capped() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(4)
+        .with_restart_limit(4, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(100))
         .with_max_restart_delay(Duration::from_millis(250))
         .spawn();
@@ -113,29 +113,46 @@ impl SupervisedTask for FlakyThenStable {
 }
 
 #[tokio::test]
-async fn long_running_task_resets_restart_budget() {
+async fn restarts_outside_the_window_are_forgotten() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(2)
+        .with_restart_limit(2, Duration::from_millis(500))
         .with_base_restart_delay(Duration::from_millis(10))
         .with_max_restart_delay(Duration::from_millis(10))
-        .with_stable_after(Duration::from_millis(500))
         .spawn();
     let task = FlakyThenStable::default();
     handle.add_task("t", task.clone()).await.unwrap();
 
-    // Runs 1 and 2 fail fast (budget exhausted). Run 3 lasts 1s > stable_after,
-    // so its failure resets the budget: runs 4 and 5 happen before death.
+    // Runs 1 and 2 fail fast: 2 restarts in the window. Run 3 lasts 1s, so
+    // when it fails both restarts are older than the window: runs 4 and 5 happen.
     sleep_ms(2000).await;
     assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
     assert_eq!(runs(&task.runs), 5);
 }
 
 #[tokio::test]
+async fn restarts_inside_the_window_count() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_restart_limit(2, Duration::from_secs(5))
+        .with_base_restart_delay(Duration::from_millis(10))
+        .with_max_restart_delay(Duration::from_millis(10))
+        .spawn();
+    let task = FlakyThenStable::default();
+    handle.add_task("t", task.clone()).await.unwrap();
+
+    // Same task, window wider than the 1s run: run 3's failure is the third
+    // strike.
+    sleep_ms(2000).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert_eq!(runs(&task.runs), 3);
+}
+
+#[tokio::test]
 async fn panicking_task_is_restarted() {
     pause();
     let handle = SupervisorBuilder::new()
-        .with_max_restart_attempts(1)
+        .with_restart_limit(1, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(10))
         .spawn();
     let task = Panicking::default();

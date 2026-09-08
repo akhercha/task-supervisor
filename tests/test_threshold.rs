@@ -10,7 +10,7 @@ use common::{sleep_ms, Cooperative, Failing};
 
 fn builder() -> SupervisorBuilder {
     SupervisorBuilder::new()
-        .with_max_restart_attempts(0)
+        .with_restart_limit(0, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(10))
 }
 

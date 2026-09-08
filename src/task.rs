@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc};
 
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -128,8 +128,8 @@ pub(crate) struct Slot {
     pub(crate) cancel: Option<CancellationToken>,
     /// Incremented on every start; stale backoff timers carry an older value.
     pub(crate) generation: u64,
-    pub(crate) restart_attempts: u32,
-    pub(crate) started_at: tokio::time::Instant,
+    /// Restart instants inside the current window, oldest first.
+    pub(crate) restarts: VecDeque<tokio::time::Instant>,
     /// What to do once a `Stopping` run exits.
     pub(crate) restart_after_stop: bool,
     /// `kill_task` / `restart_task` callers answered once the run has exited.
@@ -144,8 +144,7 @@ impl Slot {
             task,
             cancel: None,
             generation: 0,
-            restart_attempts: 0,
-            started_at: tokio::time::Instant::now(),
+            restarts: VecDeque::new(),
             restart_after_stop: false,
             stop_waiters: Vec::new(),
         }

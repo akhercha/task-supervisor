@@ -10,10 +10,9 @@ use crate::{
 ///
 /// | Setting | Default |
 /// | --- | --- |
-/// | `max_restart_attempts` | 5 |
+/// | `restart_limit` | 5 restarts in 60s |
 /// | `base_restart_delay` | 1s |
 /// | `max_restart_delay` | 30s |
-/// | `stable_after` | 60s |
 /// | `dead_tasks_threshold` | disabled |
 /// | `stop_timeout` | 5s |
 pub struct SupervisorBuilder {
@@ -27,10 +26,10 @@ impl SupervisorBuilder {
         Self {
             tasks: HashMap::new(),
             config: Config {
-                max_restart_attempts: Some(5),
+                max_restarts: Some(5),
+                restart_window: Duration::from_secs(60),
                 base_restart_delay: Duration::from_secs(1),
                 max_restart_delay: Duration::from_secs(30),
-                stable_after: Duration::from_secs(60),
                 dead_tasks_threshold: None,
                 stop_timeout: Duration::from_secs(5),
             },
@@ -46,20 +45,26 @@ impl SupervisorBuilder {
         self
     }
 
-    /// Number of automatic restarts before a task is declared
-    /// [`Dead`](crate::TaskStatus::Dead). `0` disables restarts.
-    pub fn with_max_restart_attempts(mut self, attempts: u32) -> Self {
-        self.config.max_restart_attempts = Some(attempts);
+    /// A task that would need more than `max_restarts` restarts within any
+    /// `window` is declared [`Dead`](crate::TaskStatus::Dead) instead.
+    /// `max_restarts = 0` disables restarts. The backoff delay doubles with
+    /// each restart inside the window, so a task that stays up longer than
+    /// `window` starts again from `base_restart_delay`.
+    pub fn with_restart_limit(mut self, max_restarts: u32, window: Duration) -> Self {
+        self.config.max_restarts = Some(max_restarts);
+        self.config.restart_window = window;
         self
     }
 
-    /// Never give up restarting a failing task.
+    /// Never give up restarting a failing task. The window still drives the
+    /// backoff delay.
     pub fn with_unlimited_restarts(mut self) -> Self {
-        self.config.max_restart_attempts = None;
+        self.config.max_restarts = None;
         self
     }
 
-    /// Delay before the first restart. Each further restart doubles it.
+    /// Delay before the first restart in a window. Each further restart in
+    /// the window doubles it.
     pub fn with_base_restart_delay(mut self, delay: Duration) -> Self {
         self.config.base_restart_delay = delay;
         self
@@ -68,13 +73,6 @@ impl SupervisorBuilder {
     /// Upper bound for the restart delay.
     pub fn with_max_restart_delay(mut self, delay: Duration) -> Self {
         self.config.max_restart_delay = delay;
-        self
-    }
-
-    /// A run that lasts at least this long resets the task's restart budget
-    /// when it fails.
-    pub fn with_stable_after(mut self, duration: Duration) -> Self {
-        self.config.stable_after = duration;
         self
     }
 
