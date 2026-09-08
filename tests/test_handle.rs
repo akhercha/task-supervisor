@@ -3,8 +3,11 @@ mod common;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use common::{runs, sleep_ms, Cooperative, Failing, Stubborn};
-use task_supervisor::{SupervisorBuilder, SupervisorHandleError, TaskStatus};
+use common::{runs, sleep_ms, Completes, Cooperative, Failing, Stubborn};
+use task_supervisor::{
+    CancellationToken, SupervisedTask, SupervisorBuilder, SupervisorHandleError, TaskResult,
+    TaskStatus,
+};
 use tokio::time::{pause, Instant};
 
 fn builder() -> SupervisorBuilder {
@@ -200,4 +203,103 @@ async fn operations_after_shutdown_report_closed() {
         handle.task_status("t").await,
         Err(SupervisorHandleError::Closed)
     ));
+}
+
+#[tokio::test]
+async fn completed_task_can_be_restarted_or_killed() {
+    pause();
+    let handle = builder().spawn();
+    let task = Completes {
+        after: Duration::from_millis(10),
+    };
+    handle.add_task("a", task.clone()).await.unwrap();
+    handle.add_task("b", task).await.unwrap();
+    sleep_ms(50).await;
+    assert_eq!(
+        handle.task_status("a").await.unwrap(),
+        TaskStatus::Completed
+    );
+
+    handle.restart_task("a").await.unwrap();
+    assert_eq!(handle.task_status("a").await.unwrap(), TaskStatus::Running);
+    sleep_ms(50).await;
+    assert_eq!(
+        handle.task_status("a").await.unwrap(),
+        TaskStatus::Completed
+    );
+
+    handle.kill_task("b").await.unwrap();
+    assert_eq!(handle.task_status("b").await.unwrap(), TaskStatus::Dead);
+}
+
+/// The last request issued while a task is `Stopping` wins.
+#[tokio::test]
+async fn restart_then_kill_while_stopping_ends_dead() {
+    pause();
+    let handle = builder().spawn();
+    handle.add_task("t", Stubborn).await.unwrap();
+
+    let h = handle.clone();
+    let restart = tokio::spawn(async move { h.restart_task("t").await });
+    sleep_ms(1).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Stopping);
+    handle.kill_task("t").await.unwrap();
+
+    assert!(restart.await.unwrap().is_ok());
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+}
+
+#[tokio::test]
+async fn kill_then_restart_while_stopping_ends_running() {
+    pause();
+    let handle = builder().spawn();
+    handle.add_task("t", Stubborn).await.unwrap();
+
+    let h = handle.clone();
+    let kill = tokio::spawn(async move { h.kill_task("t").await });
+    sleep_ms(1).await;
+    handle.restart_task("t").await.unwrap();
+
+    assert!(kill.await.unwrap().is_ok());
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Running);
+}
+
+/// Invariant 6 on the stopping path: a panic during cleanup neither hangs
+/// the caller nor leaves the task in `Stopping`.
+#[tokio::test]
+async fn kill_resolves_when_task_panics_during_stop() {
+    #[derive(Clone)]
+    struct PanicsOnCancel;
+
+    impl SupervisedTask for PanicsOnCancel {
+        async fn run(self, cancel: CancellationToken) -> TaskResult {
+            cancel.cancelled().await;
+            panic!("cleanup panicked");
+        }
+    }
+
+    pause();
+    let handle = builder().spawn();
+    handle.add_task("t", PanicsOnCancel).await.unwrap();
+
+    let started = Instant::now();
+    handle.kill_task("t").await.unwrap();
+    assert!(started.elapsed() < Duration::from_millis(10));
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+}
+
+#[tokio::test]
+async fn with_task_same_name_replaces_earlier_task() {
+    pause();
+    let first = Cooperative::default();
+    let second = Cooperative::default();
+    let handle = SupervisorBuilder::new()
+        .with_task("t", first.clone())
+        .with_task("t", second.clone())
+        .spawn();
+
+    sleep_ms(1).await;
+    assert_eq!(runs(&first.runs), 0);
+    assert_eq!(runs(&second.runs), 1);
+    assert_eq!(handle.task_statuses().await.unwrap().len(), 1);
 }

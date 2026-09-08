@@ -89,3 +89,20 @@ async fn threshold_zero_waits_for_a_death() {
         })
     ));
 }
+
+#[tokio::test]
+async fn threshold_zero_ignores_restarts() {
+    pause();
+    let handle = builder()
+        .with_dead_tasks_threshold(0.0)
+        .with_task("steady", Cooperative::default())
+        .spawn();
+
+    handle.restart_task("steady").await.unwrap();
+    sleep_ms(100).await;
+    assert_eq!(
+        handle.task_status("steady").await.unwrap(),
+        TaskStatus::Running
+    );
+    assert!(handle.shutdown().await.is_ok());
+}

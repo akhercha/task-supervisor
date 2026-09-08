@@ -16,23 +16,17 @@ pub type TaskResult = Result<(), TaskError>;
 
 /// A long-lived unit of work managed by the supervisor.
 ///
-/// # Lifecycle
-///
-/// Every start or restart clones the instance registered with the supervisor
-/// and hands the clone to `run` by value. Owned fields therefore start from
-/// their registered value on every run; `Arc` fields are shared across runs.
+/// Every start or restart clones the registered instance and passes the clone
+/// to `run`. Owned fields reset on every run; `Arc` fields are shared.
 ///
 /// | `run` outcome | Supervisor reaction |
 /// | --- | --- |
-/// | `Ok(())` | Task is [`Completed`](TaskStatus::Completed); never restarted automatically |
-/// | `Err(_)` or panic | Restarted after an exponential backoff, until the restart budget is exhausted |
+/// | `Ok(())` | [`Completed`](TaskStatus::Completed); not restarted |
+/// | `Err(_)` or panic | Restarted with backoff, [`Dead`](TaskStatus::Dead) once the restart limit is reached |
 ///
-/// # Cancellation
-///
-/// `cancel` is triggered when the supervisor wants the task to stop (kill,
-/// restart, shutdown). The task then has `stop_timeout` to return on its
-/// own; after that its future is dropped. Tasks that do not need cleanup can
-/// ignore the token.
+/// `cancel` fires on kill, restart and shutdown. The run then has
+/// `stop_timeout` to return before its future is dropped. Tasks without
+/// cleanup can ignore it.
 ///
 /// # Example
 ///

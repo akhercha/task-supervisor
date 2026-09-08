@@ -242,15 +242,20 @@ impl Supervisor {
                 Ok(()) => debug!(task = name, "stopped"),
                 Err(err) => warn!(task = name, error = %err, "stopped with error"),
             }
-            if slot.restart_after_stop {
-                start_run(slot, &self.config, &mut self.runs);
-            } else {
+            let died = !slot.restart_after_stop;
+            if died {
                 slot.status = TaskStatus::Dead;
+            } else {
+                start_run(slot, &self.config, &mut self.runs);
             }
             for waiter in std::mem::take(&mut slot.stop_waiters) {
                 let _ = waiter.send(Ok(()));
             }
-            return self.check_threshold();
+            return if died {
+                self.check_threshold()
+            } else {
+                ControlFlow::Continue(())
+            };
         }
 
         let Err(err) = result else {
@@ -333,7 +338,7 @@ impl Supervisor {
             .values()
             .filter(|slot| slot.status == TaskStatus::Dead)
             .count();
-        if dead == 0 || (dead as f64 / total as f64) < threshold {
+        if (dead as f64 / total as f64) < threshold {
             return ControlFlow::Continue(());
         }
         let err = SupervisorError::TooManyDeadTasks {

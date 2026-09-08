@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/task-supervisor.svg)](https://crates.io/crates/task-supervisor)
 [![Docs.rs](https://docs.rs/task-supervisor/badge.svg)](https://docs.rs/task-supervisor)
 
-Keeps long-lived Tokio tasks alive: restarts them with exponential backoff when they fail or panic, stops them gracefully, and lets you add, restart, kill or inspect tasks at runtime.
+Keeps long-lived Tokio tasks alive. Restarts them with exponential backoff when they fail or panic, stops them cleanly, and lets you add, restart, kill or inspect them at runtime.
 
 ```bash
 cargo add task-supervisor
@@ -11,7 +11,7 @@ cargo add task-supervisor
 
 ## Example
 
-```rust
+```rust,no_run
 use std::time::Duration;
 use task_supervisor::{CancellationToken, SupervisedTask, SupervisorBuilder, TaskResult};
 
@@ -40,77 +40,65 @@ async fn main() {
 }
 ```
 
-See [`examples/simple.rs`](examples/simple.rs) for restarts, runtime control and tracing output.
+[`examples/simple.rs`](https://github.com/akhercha/task-supervisor/blob/main/examples/simple.rs) shows restarts, runtime control and tracing output.
 
-## Lifecycle
+## How it works
 
 ```text
-           add/with_task
-                │
-                ▼
-  ┌────────► Running ──── Ok(()) ────► Completed
-  │             │
-  │        Err / panic
-  │             │
-  │             ▼
-  │        Restarting ── budget exhausted ──► Dead
-  │             │
-  └── backoff ──┘
+           add_task / with_task
+                    │
+                    ▼
+  ┌────────────► Running ──── Ok(()) ────► Completed
+  │                 │
+  │            Err / panic
+  │                 │
+  │                 ▼
+  │            Restarting ── limit reached ──► Dead
+  │                 │
+  └─── backoff ─────┘
 
-  kill / restart / shutdown on a Running task → Stopping → Dead (or a new Running)
+  kill / restart / shutdown on a Running task: Stopping, then Dead or a new Running
 ```
 
-* A failed run is restarted after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts inside the last `restart_limit` window. A task that would exceed the limit becomes `Dead`.
-* Stopping a task cancels its `CancellationToken`; the run then has `stop_timeout` to return before its future is dropped. Tasks that need no cleanup can ignore the token.
-* `run` receives a fresh **clone** of the registered task on every start. Owned fields reset; `Arc` fields are shared across runs.
-* Dropping the last `SupervisorHandle` shuts the supervisor down gracefully.
+* Each run gets a fresh clone of the registered task. Owned fields reset on every run; `Arc` fields are shared.
+* A failed run restarts after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts in the current `restart_limit` window. One restart too many and the task is `Dead`.
+* Stopping a task cancels its `CancellationToken`. The run has `stop_timeout` to return; then its future is dropped. Tasks without cleanup can ignore the token.
+* Panics inside `run` are caught and count as failures.
+* Dropping the last `SupervisorHandle` shuts the supervisor down.
 
 ## Configuration
 
-| `SupervisorBuilder` method          | Default  | Meaning                                                      |
-| ----------------------------------- | -------- | ------------------------------------------------------------ |
-| `with_restart_limit(n, window)`     | 5 in 60s | Restarts allowed within any `window` before a task is `Dead`; `with_unlimited_restarts()` |
-| `with_base_restart_delay(d)`        | 1s       | Delay before the first restart in a window, doubled each time |
-| `with_max_restart_delay(d)`         | 30s      | Cap on the restart delay                                     |
-| `with_dead_tasks_threshold(f)`      | disabled | Shut down once a task is dead and `dead / total >= f` (`0.0` = any, `1.0` = all; kills count) |
-| `with_stop_timeout(d)`              | 5s       | Grace period after cancellation before a run is dropped (kill, restart, shutdown) |
+| `SupervisorBuilder` method      | Default  | Meaning |
+| ------------------------------- | -------- | ------- |
+| `with_restart_limit(n, window)` | 5 in 60s | Max restarts within any `window`. `with_unlimited_restarts()` removes the limit. |
+| `with_base_restart_delay(d)`    | 1s       | Delay before the first restart in a window; doubles each time. |
+| `with_max_restart_delay(d)`     | 30s      | Cap on the restart delay. |
+| `with_stop_timeout(d)`          | 5s       | Time a cancelled run gets before being dropped. |
+| `with_dead_tasks_threshold(f)`  | off      | Shut down once `dead / total >= f` and at least one task is dead. Kills count. |
 
 ## Runtime control
 
-`spawn()` returns a `SupervisorHandle` (cheap to clone). Every request resolves once its effect is visible: `add_task` when the task is `Running`, `kill_task` when it is `Dead`, `restart_task` when the new run is `Running`. `kill_task`/`restart_task` on a running task therefore take up to `stop_timeout`.
+`spawn()` returns a `SupervisorHandle`, cheap to clone. Each request resolves when its effect is visible: `add_task` when the task is `Running`, `kill_task` when it is `Dead`, `restart_task` when the new run is `Running`. On a running task, `kill_task` and `restart_task` take up to `stop_timeout`.
 
-| Method                       | Errors                        |
-| ---------------------------- | ----------------------------- |
+| Method                       | Errors |
+| ---------------------------- | ------ |
 | `add_task(name, task).await` | `TaskAlreadyExists`, `Closed` |
-| `restart_task(name).await`   | `TaskNotFound`, `Closed`      |
-| `kill_task(name).await`      | `TaskNotFound`, `Closed`      |
-| `task_status(name).await`    | `TaskNotFound`, `Closed`      |
-| `task_statuses().await`      | `Closed`                      |
-| `shutdown().await`           | `SupervisorError`             |
-| `wait().await`               | `SupervisorError`             |
+| `restart_task(name).await`   | `TaskNotFound`, `Closed` |
+| `kill_task(name).await`      | `TaskNotFound`, `Closed` |
+| `task_status(name).await`    | `TaskNotFound`, `Closed` |
+| `task_statuses().await`      | `Closed` |
+| `shutdown().await`           | `TooManyDeadTasks`, `Panicked`, `Aborted` |
+| `wait().await`               | `TooManyDeadTasks`, `Panicked`, `Aborted` |
 
-`wait()` and `shutdown()` return `Err(TooManyDeadTasks)` when the dead-task threshold triggered the shutdown, `Err(Panicked)` if the supervisor itself panicked, and `Err(Aborted)` if the Tokio runtime shut down first.
+`Closed`: the supervisor has exited. `Aborted`: the Tokio runtime shut down under it. `Panicked`: a bug in this crate.
 
-## Errors
+## Errors and logs
 
-`TaskError` is `Box<dyn Error + Send + Sync>`; anything implementing `std::error::Error` converts with `?`, including `anyhow::Error`. Panics inside `run` are caught and treated as failures, including during cancellation (logged at `warn`).
+`TaskError` is `Box<dyn Error + Send + Sync>`, so `?` works on any `std::error::Error`, `anyhow::Error` included.
 
-## Logging
+Lifecycle events go through [`tracing`](https://docs.rs/tracing): `info` for start/stop, `warn` for scheduled restarts and errors during cancellation, `error` for dead tasks. No subscriber, no cost.
 
-Supervisor activity is emitted through [`tracing`](https://docs.rs/tracing) (`info` for lifecycle events, `warn` for scheduled restarts, `error` for dead tasks). Without a subscriber it costs nothing.
-
-## Upgrading from 0.4
-
-* `SupervisedTask`: `run(&mut self)` → `run(self, cancel: CancellationToken)` (`mut self` to mutate); `Clone` is now a supertrait.
-* `build().run()` → `spawn()`; the `Supervisor` type and `TaskName` alias are gone.
-* Handle methods are `async` and report errors: `get_task_status` → `task_status` (returns `Err(TaskNotFound)` instead of `None`), `get_all_task_statuses` → `task_statuses` (keys are `Arc<str>`; `statuses["name"]` still works), `restart` → `restart_task`, `kill_task` now waits for the task to stop. `add_task` on an existing name returns `Err(TaskAlreadyExists)` instead of being ignored. `shutdown()` is `async` and returns the supervisor outcome.
-* `SupervisorHandleError::{SendError, RecvError}` → `Closed`, plus `TaskAlreadyExists` and `TaskNotFound`.
-* `SupervisorError::TooManyDeadTasks { current_percentage, threshold }` → `{ dead, total, threshold }`; new variants `Panicked` and `Aborted`.
-* `TaskStatus`: `Healthy` → `Running`, `Failed` → `Restarting`, `Created` removed, `Stopping` added; `is_healthy`/`is_dead`/`is_restarting`/`has_completed` removed (compare variants).
-* `with_health_check_interval` removed (no polling anymore); `with_max_restart_attempts(n)` + `with_task_being_stable_after(d)` → `with_restart_limit(n, window)` (Erlang/systemd model: at most `n` restarts in any `window`); `with_max_backoff_exponent(n)` → `with_max_restart_delay(base * 2^n)`; `with_dead_tasks_threshold(Some(f))` → `with_dead_tasks_threshold(f)`, now triggers on `>=` once at least one task is dead.
-* `anyhow` and `tracing` features removed: `?` on `anyhow::Error` works without a feature; `tracing` is always on.
-* Dropping a handle clone no longer shuts the supervisor down; only the last one does.
-* Minimum tokio: 1.21 (`JoinSet`).
+Breaking changes are listed in the [changelog](https://github.com/akhercha/task-supervisor/blob/main/CHANGELOG.md).
 
 ## License
 

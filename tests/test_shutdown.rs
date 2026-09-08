@@ -3,7 +3,7 @@ mod common;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use task_supervisor::SupervisorBuilder;
+use task_supervisor::{SupervisorBuilder, SupervisorError};
 use tokio::time::{pause, Instant};
 
 use common::{sleep_ms, Cooperative, Stubborn};
@@ -90,4 +90,22 @@ async fn wait_can_be_called_repeatedly_and_concurrently() {
     let (r1, r2) = tokio::join!(handle.wait(), handle.wait());
     assert!(r1.is_ok() && r2.is_ok());
     assert!(handle.wait().await.is_ok());
+}
+
+/// Dropping the runtime under the supervisor is reported, not mistaken for a
+/// clean exit.
+#[test]
+fn wait_reports_runtime_abort() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let handle =
+        runtime.block_on(async { SupervisorBuilder::new().with_task("t", Stubborn).spawn() });
+    drop(runtime);
+
+    let other = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    assert_eq!(other.block_on(handle.wait()), Err(SupervisorError::Aborted));
 }
