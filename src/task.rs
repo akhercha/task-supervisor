@@ -25,14 +25,16 @@ pub type TaskResult = Result<(), TaskError>;
 /// | `Err(_)` or panic | Restarted with backoff, [`Dead`](TaskStatus::Dead) once the restart limit is reached |
 ///
 /// `cancel` fires on kill, restart and shutdown. The run then has
-/// `stop_timeout` to return before its future is dropped. Tasks without
-/// cleanup can ignore it.
+/// `stop_timeout` to return before its future is dropped. Ignore it, wrap the
+/// work in `cancel.run_until_cancelled(..)`, or `select!` on
+/// `cancel.cancelled()` when there is cleanup to do.
 ///
 /// # Example
 ///
 /// ```rust
 /// use std::sync::Arc;
 /// use std::sync::atomic::{AtomicUsize, Ordering};
+/// use std::time::Duration;
 /// use task_supervisor::{CancellationToken, SupervisedTask, TaskResult};
 ///
 /// #[derive(Clone)]
@@ -41,21 +43,26 @@ pub type TaskResult = Result<(), TaskError>;
 ///     polls: u64,
 ///     /// Shared across runs (`Arc`, cloned by reference).
 ///     total_polls: Arc<AtomicUsize>,
+///     db: Arc<Db>,
 /// }
 ///
 /// impl SupervisedTask for Worker {
 ///     async fn run(mut self, cancel: CancellationToken) -> TaskResult {
 ///         loop {
 ///             tokio::select! {
-///                 _ = cancel.cancelled() => return Ok(()),
-///                 _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+///                 _ = cancel.cancelled() => break,
+///                 _ = tokio::time::sleep(Duration::from_secs(1)) => {
 ///                     self.polls += 1;
 ///                     self.total_polls.fetch_add(1, Ordering::Relaxed);
 ///                 }
 ///             }
 ///         }
+///         self.db.flush().await?; // cleanup after cancellation
+///         Ok(())
 ///     }
 /// }
+/// # struct Db;
+/// # impl Db { async fn flush(&self) -> Result<(), std::io::Error> { Ok(()) } }
 /// ```
 pub trait SupervisedTask: Clone + Send + 'static {
     /// Runs one instance of the task until it completes, fails, or is cancelled.

@@ -20,12 +20,13 @@ struct Heartbeat;
 
 impl SupervisedTask for Heartbeat {
     async fn run(self, cancel: CancellationToken) -> TaskResult {
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => return Ok(()),
-                _ = tokio::time::sleep(Duration::from_secs(1)) => println!("beat"),
+        cancel.run_until_cancelled(async {
+            loop {
+                println!("beat");
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
-        }
+        }).await;
+        Ok(())
     }
 }
 
@@ -62,7 +63,15 @@ async fn main() {
 
 * Each run gets a fresh clone of the registered task. Owned fields reset on every run; `Arc` fields are shared.
 * A failed run restarts after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts in the current `restart_limit` window. One restart too many and the task is `Dead`.
-* Stopping a task cancels its `CancellationToken`. The run has `stop_timeout` to return; then its future is dropped. Tasks without cleanup can ignore the token.
+* Stopping a task cancels its `CancellationToken`. The run has `stop_timeout` to return; then its future is dropped.
+
+## Handling cancellation
+
+Pick the cheapest that fits:
+
+* **Ignore the token.** `run(self, _cancel: CancellationToken)`. Kill, restart and shutdown wait `stop_timeout` (5 s by default) before dropping the run. Nothing else changes.
+* **`cancel.run_until_cancelled(work).await`** as in the example. The run stops at its next `.await`, no cleanup.
+* **`tokio::select!` on `cancel.cancelled()`** when there is something to flush or close after cancellation. This is the only case that needs it.
 * Panics inside `run` are caught and count as failures.
 * Dropping the last `SupervisorHandle` shuts the supervisor down.
 

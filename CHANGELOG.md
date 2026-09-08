@@ -22,4 +22,4 @@ Rewrite of the supervisor core. Event-driven (no periodic health check), coopera
 * `TaskStatus`: `Healthy` → `Running`, `Failed` → `Restarting`, `Created` removed, `Stopping` added. `is_healthy` / `is_dead` / `is_restarting` / `has_completed` removed.
 * Builder: `with_max_restart_attempts(n)` and `with_task_being_stable_after(d)` → `with_restart_limit(n, window)` (at most `n` restarts in any `window`, default 5 in 60s). `with_max_backoff_exponent(n)` → `with_max_restart_delay(d)`. `with_health_check_interval` removed. `with_dead_tasks_threshold(Some(f))` → `with_dead_tasks_threshold(f)`, triggers on `>=` once a task is dead. New `with_stop_timeout(d)`.
 * `anyhow` and `tracing` cargo features removed. `?` on `anyhow::Error` works without a feature; `tracing` is always on.
-* Minimum tokio 1.21.
+* Minimum tokio 1.21, tokio-util 0.7.12.

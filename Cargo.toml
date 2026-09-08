@@ -12,7 +12,7 @@ license = "MIT"
 
 [dependencies]
 tokio = { version = "1.21", features = ["rt", "sync", "macros", "time"] }
-tokio-util = "0.7"
+tokio-util = "0.7.12"
 thiserror = "2"
 tracing = "0.1"
 
