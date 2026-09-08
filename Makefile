@@ -1,7 +1,6 @@
-format:
+lint:
 	cargo fmt -- --check
-	cargo clippy --locked --all-targets --all-features -- -D warnings --no-deps
-	cargo clippy --tests --no-deps -- -D warnings
+	cargo clippy --locked --all-targets -- -D warnings
 
 test:
-	cargo nextest run
+	cargo test --locked

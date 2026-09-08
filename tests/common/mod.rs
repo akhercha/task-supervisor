@@ -1,73 +1,80 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+#![allow(dead_code)]
+
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use task_supervisor::{SupervisedTask, TaskResult};
 
-/// Increments its `run_count` and completes after 100ms.
-#[allow(unused)]
+use task_supervisor::{CancellationToken, SupervisedTask, TaskResult};
+
+/// Runs until cancelled, then exits promptly. Records runs and clean stops.
 #[derive(Clone, Default)]
-pub struct CompletingTask {
-    pub run_count: Arc<AtomicUsize>,
+pub struct Cooperative {
+    pub runs: Arc<AtomicUsize>,
+    pub stopped: Arc<AtomicBool>,
 }
 
-impl SupervisedTask for CompletingTask {
-    async fn run(&mut self) -> TaskResult {
-        self.run_count.fetch_add(1, Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+impl SupervisedTask for Cooperative {
+    async fn run(self, cancel: CancellationToken) -> TaskResult {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        cancel.cancelled().await;
+        self.stopped.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
-/// Increments its `run_count` and fails immediately.
-#[allow(unused)]
+/// Ignores cancellation and never returns.
 #[derive(Clone)]
-pub struct FailingTask {
-    pub run_count: Arc<AtomicUsize>,
-}
+pub struct Stubborn;
 
-#[allow(clippy::useless_conversion)]
-impl SupervisedTask for FailingTask {
-    async fn run(&mut self) -> TaskResult {
-        self.run_count.fetch_add(1, Ordering::SeqCst);
-        Err(anyhow::anyhow!("Task failed!").into())
+impl SupervisedTask for Stubborn {
+    async fn run(self, _cancel: CancellationToken) -> TaskResult {
+        std::future::pending().await
     }
 }
 
-/// Runs forever while `run_flag` is True. Else, completes.
-#[allow(unused)]
-#[derive(Clone)]
-pub struct HealthyTask {
-    pub run_flag: Arc<std::sync::atomic::AtomicBool>,
+/// Fails immediately. Records runs.
+#[derive(Clone, Default)]
+pub struct Failing {
+    pub runs: Arc<AtomicUsize>,
 }
 
-impl SupervisedTask for HealthyTask {
-    async fn run(&mut self) -> TaskResult {
-        while self.run_flag.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+impl SupervisedTask for Failing {
+    async fn run(self, _cancel: CancellationToken) -> TaskResult {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        Err("boom".into())
+    }
+}
+
+/// Completes successfully after `after`.
+#[derive(Clone)]
+pub struct Completes {
+    pub after: Duration,
+}
+
+impl SupervisedTask for Completes {
+    async fn run(self, _cancel: CancellationToken) -> TaskResult {
+        tokio::time::sleep(self.after).await;
         Ok(())
     }
 }
 
-/// Completes immediately.
-#[allow(unused)]
-#[derive(Clone)]
-pub struct ImmediateCompleteTask;
+/// Panics immediately. Records runs.
+#[derive(Clone, Default)]
+pub struct Panicking {
+    pub runs: Arc<AtomicUsize>,
+}
 
-impl SupervisedTask for ImmediateCompleteTask {
-    async fn run(&mut self) -> TaskResult {
-        Ok(())
+impl SupervisedTask for Panicking {
+    async fn run(self, _cancel: CancellationToken) -> TaskResult {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        panic!("task panicked");
     }
 }
 
-/// Fails immediately.
-#[allow(unused)]
-#[derive(Clone)]
-pub struct ImmediateFailTask;
+pub fn runs(counter: &Arc<AtomicUsize>) -> usize {
+    counter.load(Ordering::SeqCst)
+}
 
-#[allow(clippy::useless_conversion)]
-impl SupervisedTask for ImmediateFailTask {
-    async fn run(&mut self) -> TaskResult {
-        Err(anyhow::anyhow!("Immediate failure!").into())
-    }
+pub async fn sleep_ms(ms: u64) {
+    tokio::time::sleep(Duration::from_millis(ms)).await;
 }

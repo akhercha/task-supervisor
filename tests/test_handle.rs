@@ -1,115 +1,203 @@
 mod common;
 
-use std::{sync::Arc, time::Duration};
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
-use tokio::time::{advance, pause};
+use common::{runs, sleep_ms, Cooperative, Failing, Stubborn};
+use task_supervisor::{SupervisorBuilder, SupervisorHandleError, TaskStatus};
+use tokio::time::{pause, Instant};
 
-use task_supervisor::{SupervisorBuilder, SupervisorHandle, SupervisorHandleError, TaskStatus};
-
-use common::{CompletingTask, HealthyTask, ImmediateCompleteTask};
-
-fn supervisor_handle() -> SupervisorHandle {
+fn builder() -> SupervisorBuilder {
     SupervisorBuilder::new()
-        .with_health_check_interval(Duration::from_millis(100))
-        .with_max_restart_attempts(3)
+        .with_max_restart_attempts(5)
         .with_base_restart_delay(Duration::from_millis(100))
-        .build()
-        .run()
+        .with_max_restart_delay(Duration::from_millis(100))
+        .with_stop_timeout(Duration::from_millis(200))
 }
 
 #[tokio::test]
-async fn test_add_task_dynamically() {
+async fn add_duplicate_name_is_rejected() {
     pause();
+    let handle = builder().spawn();
+    handle.add_task("t", Cooperative::default()).await.unwrap();
 
-    let handle = supervisor_handle();
-
-    let task = CompletingTask {
-        run_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-    };
-    handle.add_task("task", task.clone()).unwrap();
-
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    let status = handle.get_task_status("task").await.unwrap().unwrap();
-    assert_eq!(status, TaskStatus::Completed);
-    assert_eq!(task.run_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let err = handle
+        .add_task("t", Cooperative::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SupervisorHandleError::TaskAlreadyExists(name) if name == "t"));
 }
 
 #[tokio::test]
-async fn test_restart_task() {
+async fn unknown_task_is_reported() {
     pause();
+    let handle = builder().spawn();
 
-    let handle = supervisor_handle();
-
-    let task = CompletingTask {
-        run_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-    };
-
-    handle.add_task("task", task.clone()).unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    handle.restart("task").unwrap();
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    let status = handle.get_task_status("task").await.unwrap().unwrap();
-    assert_eq!(status, TaskStatus::Completed);
-
-    // Count should be 2: Initial + restart
-    assert_eq!(task.run_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(matches!(
+        handle.restart_task("nope").await.unwrap_err(),
+        SupervisorHandleError::TaskNotFound(name) if name == "nope"
+    ));
+    assert!(matches!(
+        handle.kill_task("nope").await.unwrap_err(),
+        SupervisorHandleError::TaskNotFound(_)
+    ));
+    assert!(matches!(
+        handle.task_status("nope").await.unwrap_err(),
+        SupervisorHandleError::TaskNotFound(_)
+    ));
 }
 
 #[tokio::test]
-async fn test_kill_task() {
+async fn kill_stops_cooperative_task() {
     pause();
+    let handle = builder().spawn();
+    let task = Cooperative::default();
+    handle.add_task("t", task.clone()).await.unwrap();
 
-    let handle = supervisor_handle();
+    handle.kill_task("t").await.unwrap();
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert!(task.stopped.load(Ordering::SeqCst));
 
-    let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let task = HealthyTask {
-        run_flag: run_flag.clone(),
-    };
-    handle.add_task("task", task).unwrap();
-
-    advance(Duration::from_millis(50)).await;
-    handle.kill_task("task").unwrap();
-    advance(Duration::from_millis(100)).await;
-
-    let status = handle.get_task_status("task").await.unwrap().unwrap();
-    assert_eq!(status, TaskStatus::Dead);
+    // Killing a dead task is a no-op.
+    handle.kill_task("t").await.unwrap();
 }
 
 #[tokio::test]
-async fn test_supervisor_shutdown() {
+async fn kill_of_stubborn_task_resolves_at_stop_timeout() {
     pause();
+    let handle = builder().spawn();
+    handle.add_task("t", Stubborn).await.unwrap();
 
-    let handle = supervisor_handle();
+    let observer = handle.clone();
+    let observed = tokio::spawn(async move {
+        sleep_ms(100).await;
+        observer.task_status("t").await.unwrap()
+    });
 
-    let run_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let task = HealthyTask {
-        run_flag: run_flag.clone(),
-    };
+    let started = Instant::now();
+    handle.kill_task("t").await.unwrap();
+    let elapsed = started.elapsed();
+    assert!((200..210).contains(&elapsed.as_millis()), "{elapsed:?}");
+    assert_eq!(observed.await.unwrap(), TaskStatus::Stopping);
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+}
 
-    handle.add_task("task", task).unwrap();
-    advance(Duration::from_millis(50)).await;
+/// Regression: requests during the shutdown drain must fail fast, not wait
+/// for `stop_timeout`.
+#[tokio::test]
+async fn requests_during_shutdown_drain_fail_immediately() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_stop_timeout(Duration::from_secs(5))
+        .with_task("t", Stubborn)
+        .spawn();
 
-    handle.shutdown().unwrap();
-    advance(Duration::from_millis(200)).await;
+    let shutting_down = handle.clone();
+    let shutdown = tokio::spawn(async move { shutting_down.shutdown().await });
+    sleep_ms(1).await;
 
-    let result = handle.get_task_status("task").await;
-    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
+    let started = Instant::now();
+    assert!(matches!(
+        handle.task_status("t").await,
+        Err(SupervisorHandleError::Closed)
+    ));
+    assert!(started.elapsed() < Duration::from_millis(10));
+    assert!(shutdown.await.unwrap().is_ok());
+}
+
+/// Regression: a pending backoff restart must not resurrect a killed task.
+#[tokio::test]
+async fn kill_during_backoff_stays_dead() {
+    pause();
+    let handle = builder().spawn();
+    let task = Failing::default();
+    handle.add_task("t", task.clone()).await.unwrap();
+
+    sleep_ms(1).await;
+    assert_eq!(
+        handle.task_status("t").await.unwrap(),
+        TaskStatus::Restarting
+    );
+    handle.kill_task("t").await.unwrap();
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+
+    sleep_ms(500).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert_eq!(runs(&task.runs), 1);
+}
+
+/// Regression: a manual restart during backoff must not leave a stale timer
+/// that fires a second, unrequested restart.
+#[tokio::test]
+async fn restart_during_backoff_does_not_double_run() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_max_restart_attempts(5)
+        .with_base_restart_delay(Duration::from_secs(1))
+        .with_max_restart_delay(Duration::from_secs(1))
+        .spawn();
+    let task = Failing::default();
+    handle.add_task("t", task.clone()).await.unwrap();
+
+    // t=0: run 1 fails, backoff timer at t=1000.
+    sleep_ms(100).await;
+    handle.restart_task("t").await.unwrap();
+    // t=100: run 2 fails, backoff timer at t=1100.
+    sleep_ms(1).await;
+    assert_eq!(runs(&task.runs), 2);
+
+    sleep_ms(950).await; // t=1051: stale timer from run 1 fired, must be ignored.
+    assert_eq!(runs(&task.runs), 2);
+    sleep_ms(100).await; // t=1151: run 3.
+    assert_eq!(runs(&task.runs), 3);
 }
 
 #[tokio::test]
-async fn test_error_handling() {
+async fn manual_restart_resets_restart_budget() {
     pause();
+    let handle = SupervisorBuilder::new()
+        .with_max_restart_attempts(1)
+        .with_base_restart_delay(Duration::from_millis(100))
+        .spawn();
+    let task = Failing::default();
+    handle.add_task("t", task.clone()).await.unwrap();
 
-    let handle = supervisor_handle();
+    sleep_ms(500).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert_eq!(runs(&task.runs), 2);
 
-    handle.shutdown().unwrap();
-    advance(Duration::from_millis(500)).await;
+    handle.restart_task("t").await.unwrap();
+    sleep_ms(500).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert_eq!(runs(&task.runs), 4, "fresh budget: one run + one restart");
+}
 
-    let result = handle.add_task("task", ImmediateCompleteTask);
-    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
+#[tokio::test]
+async fn restart_running_task_stops_it_then_starts_a_fresh_run() {
+    pause();
+    let handle = builder().spawn();
+    let task = Cooperative::default();
+    handle.add_task("t", task.clone()).await.unwrap();
 
-    let result = handle.get_task_status("non_existent").await;
-    assert!(matches!(result, Err(SupervisorHandleError::SendError)));
+    handle.restart_task("t").await.unwrap();
+    assert_eq!(runs(&task.runs), 2);
+    assert!(task.stopped.load(Ordering::SeqCst));
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn operations_after_shutdown_report_closed() {
+    pause();
+    let handle = builder().spawn();
+    handle.add_task("t", Cooperative::default()).await.unwrap();
+    handle.shutdown().await.unwrap();
+
+    assert!(matches!(
+        handle.add_task("u", Cooperative::default()).await,
+        Err(SupervisorHandleError::Closed)
+    ));
+    assert!(matches!(
+        handle.task_status("t").await,
+        Err(SupervisorHandleError::Closed)
+    ));
 }
