@@ -138,6 +138,7 @@ async fn restart_during_backoff_does_not_double_run() {
         .with_restart_limit(5, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_secs(1))
         .with_max_restart_delay(Duration::from_secs(1))
+        .with_restart_jitter(0.0)
         .spawn();
     let task = Failing::default();
     handle.add_task("t", task.clone()).await.unwrap();

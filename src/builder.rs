@@ -13,6 +13,7 @@ use crate::{
 /// | `restart_limit` | 5 restarts in 60s |
 /// | `base_restart_delay` | 1s |
 /// | `max_restart_delay` | 30s |
+/// | `restart_jitter` | 0.1 |
 /// | `dead_tasks_threshold` | disabled |
 /// | `stop_timeout` | 5s |
 pub struct SupervisorBuilder {
@@ -30,6 +31,7 @@ impl SupervisorBuilder {
                 restart_window: Duration::from_secs(60),
                 base_restart_delay: Duration::from_secs(1),
                 max_restart_delay: Duration::from_secs(30),
+                restart_jitter: 0.1,
                 dead_tasks_threshold: None,
                 stop_timeout: Duration::from_secs(5),
             },
@@ -73,6 +75,14 @@ impl SupervisorBuilder {
     /// Upper bound for the restart delay.
     pub fn with_max_restart_delay(mut self, delay: Duration) -> Self {
         self.config.max_restart_delay = delay;
+        self
+    }
+
+    /// Randomly shortens each restart delay by up to this fraction of itself
+    /// (`0.0..=1.0`), so tasks that failed together do not restart in
+    /// lockstep. `0.0` disables it.
+    pub fn with_restart_jitter(mut self, fraction: f64) -> Self {
+        self.config.restart_jitter = fraction.clamp(0.0, 1.0);
         self
     }
 

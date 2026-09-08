@@ -62,7 +62,7 @@ async fn main() {
 ```
 
 * Each run gets a fresh clone of the registered task. Owned fields reset on every run; `Arc` fields are shared.
-* A failed run restarts after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts in the current `restart_limit` window. One restart too many and the task is `Dead`.
+* A failed run restarts after `base_restart_delay * 2^n`, capped at `max_restart_delay`, where `n` is the number of restarts in the current `restart_limit` window, minus a random jitter of up to `restart_jitter`. One restart too many and the task is `Dead`.
 * Stopping a task cancels its `CancellationToken`. The run has `stop_timeout` to return; then its future is dropped.
 
 ## Handling cancellation
@@ -82,6 +82,7 @@ Pick the cheapest that fits:
 | `with_restart_limit(n, window)` | 5 in 60s | Max restarts within any `window`. `with_unlimited_restarts()` removes the limit. |
 | `with_base_restart_delay(d)`    | 1s       | Delay before the first restart in a window; doubles each time. |
 | `with_max_restart_delay(d)`     | 30s      | Cap on the restart delay. |
+| `with_restart_jitter(f)`        | 0.1      | Shortens each delay by up to `f` of itself, at random. `0.0` disables. |
 | `with_stop_timeout(d)`          | 5s       | Time a cancelled run gets before being dropped. |
 | `with_dead_tasks_threshold(f)`  | off      | Shut down once `dead / total >= f` and at least one task is dead. Kills count. |
 
