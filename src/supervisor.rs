@@ -1,6 +1,7 @@
 use std::{
-    collections::{BinaryHeap, HashMap},
+    collections::{hash_map::RandomState, BinaryHeap, HashMap},
     future::{poll_fn, Future},
+    hash::{BuildHasher, Hasher},
     ops::ControlFlow,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,
@@ -53,6 +54,7 @@ pub(crate) struct Config {
     pub(crate) restart_window: Duration,
     pub(crate) base_restart_delay: Duration,
     pub(crate) max_restart_delay: Duration,
+    pub(crate) restart_jitter: f64,
     pub(crate) dead_tasks_threshold: Option<f64>,
     pub(crate) stop_timeout: Duration,
 }
@@ -290,13 +292,13 @@ impl Supervisor {
             return self.check_threshold();
         }
 
-        // ponytail: no jitter; add if many tasks share a failing dependency.
         let factor = 2u32.saturating_pow(recent.min(31) as u32);
         let delay = self
             .config
             .base_restart_delay
             .saturating_mul(factor)
             .min(self.config.max_restart_delay);
+        let delay = jitter(delay, self.config.restart_jitter);
         slot.restarts.push_back(now);
         // Unlimited mode: the exponent saturates anyway, keep the deque bounded.
         if slot.restarts.len() > 32 {
@@ -413,4 +415,16 @@ fn start_run(slot: &mut Slot, config: &Config, runs: &mut JoinSet<RunOutput>) {
 /// Stand-in deadline for delays that overflow the clock: effectively "never".
 fn far_future() -> Instant {
     Instant::now() + Duration::from_secs(30 * 365 * 24 * 3600)
+}
+
+/// Uniform draw from `[delay * (1 - fraction), delay]`, so restarts of tasks
+/// that failed together do not hit a shared dependency in lockstep.
+fn jitter(delay: Duration, fraction: f64) -> Duration {
+    if fraction <= 0.0 || delay.is_zero() {
+        return delay;
+    }
+    // `RandomState` seeds are per-thread random and stepped on every `new()`;
+    // good enough for spreading timers, and free of a dependency.
+    let draw = RandomState::new().build_hasher().finish() as f64 / u64::MAX as f64;
+    delay.mul_f64(1.0 - fraction * draw)
 }

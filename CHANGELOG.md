@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+* Restart delays get a random jitter (`with_restart_jitter`, default 10%) so tasks that failed together do not restart in lockstep. Idea from #24 by @EvolveArt.
+
 ## 0.5.0
 
 Rewrite of the supervisor core. Event-driven (no periodic health check), cooperative cancellation, real errors from the handle.

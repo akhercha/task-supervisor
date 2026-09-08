@@ -62,6 +62,7 @@ async fn backoff_doubles_and_is_capped() {
         .with_restart_limit(4, Duration::from_secs(60))
         .with_base_restart_delay(Duration::from_millis(100))
         .with_max_restart_delay(Duration::from_millis(250))
+        .with_restart_jitter(0.0)
         .spawn();
     let task = Failing::default();
     handle.add_task("t", task.clone()).await.unwrap();
@@ -78,6 +79,34 @@ async fn backoff_doubles_and_is_capped() {
     sleep_ms(250).await; // t=850
     assert_eq!(runs(&task.runs), 5);
     assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+}
+
+#[tokio::test]
+async fn jitter_spreads_restarts_of_tasks_that_failed_together() {
+    pause();
+    let mut builder = SupervisorBuilder::new()
+        .with_base_restart_delay(Duration::from_secs(1))
+        .with_max_restart_delay(Duration::from_secs(1))
+        .with_restart_jitter(0.5);
+    let tasks: Vec<Failing> = (0..40).map(|_| Failing::default()).collect();
+    for (i, task) in tasks.iter().enumerate() {
+        builder = builder.with_task(&format!("t{i}"), task.clone());
+    }
+    let handle = builder.spawn();
+
+    // Delays are drawn from [500ms, 1s]: at 750ms about half the tasks have
+    // restarted. All or none has probability 2^-40.
+    sleep_ms(750).await;
+    let restarted = tasks.iter().filter(|t| runs(&t.runs) == 2).count();
+    assert!(
+        restarted > 0,
+        "no task restarted early: jitter has no effect"
+    );
+    assert!(
+        restarted < 40,
+        "every task restarted early: delays exceed the bound"
+    );
+    drop(handle);
 }
 
 #[tokio::test]
