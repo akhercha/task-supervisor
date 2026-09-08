@@ -71,8 +71,8 @@ See [`examples/simple.rs`](examples/simple.rs) for restarts, runtime control and
 | ----------------------------------- | -------- | ------------------------------------------------------------ |
 | `with_max_restart_attempts(n)`      | 5        | Restarts before a task is `Dead`; `with_unlimited_restarts()` |
 | `with_base_restart_delay(d)`        | 1s       | Delay before the first restart, doubled each time            |
-| `with_max_restart_delay(d)`         | 32s      | Cap on the restart delay                                     |
-| `with_stable_after(d)`              | 80s      | Run length that resets the restart budget                    |
+| `with_max_restart_delay(d)`         | 30s      | Cap on the restart delay                                     |
+| `with_stable_after(d)`              | 60s      | Run length that resets the restart budget                    |
 | `with_dead_tasks_threshold(f)`      | disabled | Shut down once a task is dead and `dead / total >= f` (`0.0` = any, `1.0` = all; kills count) |
 | `with_stop_timeout(d)`              | 5s       | Grace period after cancellation before a run is dropped (kill, restart, shutdown) |
 

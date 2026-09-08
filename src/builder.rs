@@ -12,8 +12,8 @@ use crate::{
 /// | --- | --- |
 /// | `max_restart_attempts` | 5 |
 /// | `base_restart_delay` | 1s |
-/// | `max_restart_delay` | 32s |
-/// | `stable_after` | 80s |
+/// | `max_restart_delay` | 30s |
+/// | `stable_after` | 60s |
 /// | `dead_tasks_threshold` | disabled |
 /// | `stop_timeout` | 5s |
 pub struct SupervisorBuilder {
@@ -29,8 +29,8 @@ impl SupervisorBuilder {
             config: Config {
                 max_restart_attempts: Some(5),
                 base_restart_delay: Duration::from_secs(1),
-                max_restart_delay: Duration::from_secs(32),
-                stable_after: Duration::from_secs(80),
+                max_restart_delay: Duration::from_secs(30),
+                stable_after: Duration::from_secs(60),
                 dead_tasks_threshold: None,
                 stop_timeout: Duration::from_secs(5),
             },
