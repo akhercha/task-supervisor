@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+* `with_restart_limit(n, _)` with `n > 32` never marked the task `Dead`: the restart history was truncated to 32 entries.
+* A `kill_task` still waiting when `shutdown` started returned `Err(Closed)` although the task was stopped. It now returns `Ok(())`. A pending `restart_task` still returns `Err(Closed)`: no new run starts.
+* The published package no longer ships CI and tooling files.
+
 ## 0.5.1
 
 * Restart delays get a random jitter (`with_restart_jitter`, default 10%) so tasks that failed together do not restart in lockstep. Idea from #24 by @EvolveArt.

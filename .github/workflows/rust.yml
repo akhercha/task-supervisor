@@ -17,3 +17,5 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: rustup toolchain install 1.75 --profile minimal
+      - run: cargo +1.75 check --locked --lib

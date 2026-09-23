@@ -103,7 +103,7 @@ pub enum TaskStatus {
     Stopping,
     /// `run` returned `Ok(())`. Terminal unless restarted manually.
     Completed,
-    /// Killed, or restart budget exhausted. Terminal unless restarted manually.
+    /// Killed, or restart limit reached. Terminal unless restarted manually.
     Dead,
 }
 
@@ -133,8 +133,10 @@ pub(crate) struct Slot {
     pub(crate) restarts: VecDeque<tokio::time::Instant>,
     /// What to do once a `Stopping` run exits.
     pub(crate) restart_after_stop: bool,
-    /// `kill_task` / `restart_task` callers answered once the run has exited.
-    pub(crate) stop_waiters: Vec<Reply<()>>,
+    /// `kill_task` callers, answered once the run has exited.
+    pub(crate) kill_waiters: Vec<Reply<()>>,
+    /// `restart_task` callers, answered once the new run has started.
+    pub(crate) restart_waiters: Vec<Reply<()>>,
 }
 
 impl Slot {
@@ -147,7 +149,8 @@ impl Slot {
             generation: 0,
             restarts: VecDeque::new(),
             restart_after_stop: false,
-            stop_waiters: Vec::new(),
+            kill_waiters: Vec::new(),
+            restart_waiters: Vec::new(),
         }
     }
 
