@@ -157,7 +157,7 @@ async fn restart_during_backoff_does_not_double_run() {
 }
 
 #[tokio::test]
-async fn manual_restart_resets_restart_budget() {
+async fn manual_restart_clears_restart_history() {
     pause();
     let handle = SupervisorBuilder::new()
         .with_restart_limit(1, Duration::from_secs(60))
@@ -173,7 +173,7 @@ async fn manual_restart_resets_restart_budget() {
     handle.restart_task("t").await.unwrap();
     sleep_ms(500).await;
     assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
-    assert_eq!(runs(&task.runs), 4, "fresh budget: one run + one restart");
+    assert_eq!(runs(&task.runs), 4, "fresh history: one run + one restart");
 }
 
 #[tokio::test]

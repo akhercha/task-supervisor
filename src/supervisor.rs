@@ -180,7 +180,7 @@ impl Supervisor {
                 match slot.status {
                     TaskStatus::Running | TaskStatus::Stopping => {
                         slot.request_stop(true);
-                        slot.stop_waiters.push(reply);
+                        slot.restart_waiters.push(reply);
                     }
                     TaskStatus::Restarting | TaskStatus::Completed | TaskStatus::Dead => {
                         start_run(slot, &self.config, &mut self.runs);
@@ -197,7 +197,7 @@ impl Supervisor {
                 match slot.status {
                     TaskStatus::Running | TaskStatus::Stopping => {
                         slot.request_stop(false);
-                        slot.stop_waiters.push(reply);
+                        slot.kill_waiters.push(reply);
                     }
                     TaskStatus::Restarting | TaskStatus::Completed => {
                         slot.status = TaskStatus::Dead;
@@ -250,7 +250,10 @@ impl Supervisor {
             } else {
                 start_run(slot, &self.config, &mut self.runs);
             }
-            for waiter in std::mem::take(&mut slot.stop_waiters) {
+            let waiters = std::mem::take(&mut slot.kill_waiters)
+                .into_iter()
+                .chain(std::mem::take(&mut slot.restart_waiters));
+            for waiter in waiters {
                 let _ = waiter.send(Ok(()));
             }
             return if died {
@@ -300,8 +303,9 @@ impl Supervisor {
             .min(self.config.max_restart_delay);
         let delay = jitter(delay, self.config.restart_jitter);
         slot.restarts.push_back(now);
-        // Unlimited mode: the exponent saturates anyway, keep the deque bounded.
-        if slot.restarts.len() > 32 {
+        // Unlimited mode only: the exponent saturates at 31, so older entries
+        // are irrelevant. With a limit, the task dies before exceeding it.
+        if self.config.max_restarts.is_none() && slot.restarts.len() > 32 {
             slot.restarts.pop_front();
         }
         slot.status = TaskStatus::Restarting;
@@ -367,6 +371,17 @@ impl Supervisor {
             if let Ok((name, Err(err))) = exit {
                 warn!(task = %name, error = %err, "stopped with error");
             }
+        }
+        // Every run has exited: pending kills succeeded. Pending restarts are
+        // dropped here, so their callers get `Closed`.
+        for slot in self.tasks.values_mut() {
+            if slot.status == TaskStatus::Stopping {
+                slot.status = TaskStatus::Dead;
+            }
+            for waiter in slot.kill_waiters.drain(..) {
+                let _ = waiter.send(Ok(()));
+            }
+            slot.restart_waiters.clear();
         }
         info!("all tasks stopped");
     }

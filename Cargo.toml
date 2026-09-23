@@ -1,6 +1,6 @@
 [package]
 name = "task-supervisor"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 rust-version = "1.75"
 categories = ["asynchronous"]
@@ -9,6 +9,7 @@ authors = ["akhercha <adel@pragma.build>"]
 keywords = ["tasks", "tokio", "supervisor"]
 repository = "https://github.com/akhercha/task-supervisor"
 license = "MIT"
+exclude = [".github/", ".omp/", "Makefile"]
 
 [dependencies]
 tokio = { version = "1.21", features = ["rt", "sync", "macros", "time"] }

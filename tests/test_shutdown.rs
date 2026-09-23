@@ -3,7 +3,7 @@ mod common;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use task_supervisor::{SupervisorBuilder, SupervisorError};
+use task_supervisor::{SupervisorBuilder, SupervisorError, SupervisorHandleError};
 use tokio::time::{pause, Instant};
 
 use common::{sleep_ms, Cooperative, Stubborn};
@@ -108,4 +108,40 @@ fn wait_reports_runtime_abort() {
         .build()
         .unwrap();
     assert_eq!(other.block_on(handle.wait()), Err(SupervisorError::Aborted));
+}
+
+/// Regression: a kill still waiting for its run to exit when shutdown starts
+/// got `Closed`, although the task does end up dead.
+#[tokio::test]
+async fn kill_pending_at_shutdown_resolves_ok() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_stop_timeout(Duration::from_millis(200))
+        .with_task("t", Stubborn)
+        .spawn();
+
+    let h = handle.clone();
+    let kill = tokio::spawn(async move { h.kill_task("t").await });
+    sleep_ms(1).await;
+    handle.shutdown().await.unwrap();
+
+    assert_eq!(kill.await.unwrap(), Ok(()));
+}
+
+/// A restart interrupted by shutdown never produces a new run: it reports
+/// `Closed`.
+#[tokio::test]
+async fn restart_pending_at_shutdown_reports_closed() {
+    pause();
+    let handle = SupervisorBuilder::new()
+        .with_stop_timeout(Duration::from_millis(200))
+        .with_task("t", Stubborn)
+        .spawn();
+
+    let h = handle.clone();
+    let restart = tokio::spawn(async move { h.restart_task("t").await });
+    sleep_ms(1).await;
+    handle.shutdown().await.unwrap();
+
+    assert_eq!(restart.await.unwrap(), Err(SupervisorHandleError::Closed));
 }

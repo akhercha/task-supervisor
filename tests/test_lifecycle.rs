@@ -81,6 +81,25 @@ async fn backoff_doubles_and_is_capped() {
     assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
 }
 
+/// Regression: the restart history was truncated to 32 entries, so a limit
+/// above 32 was never reached.
+#[tokio::test]
+async fn restart_limit_above_32_is_enforced() {
+    pause();
+    let task = Failing::default();
+    let handle = SupervisorBuilder::new()
+        .with_restart_limit(33, Duration::from_secs(3600))
+        .with_base_restart_delay(Duration::from_millis(1))
+        .with_max_restart_delay(Duration::from_millis(1))
+        .with_restart_jitter(0.0)
+        .with_task("t", task.clone())
+        .spawn();
+
+    sleep_ms(1000).await;
+    assert_eq!(handle.task_status("t").await.unwrap(), TaskStatus::Dead);
+    assert_eq!(runs(&task.runs), 34, "initial run + 33 restarts");
+}
+
 #[tokio::test]
 async fn jitter_spreads_restarts_of_tasks_that_failed_together() {
     pause();

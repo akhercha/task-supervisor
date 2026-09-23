@@ -88,10 +88,12 @@ impl SupervisorHandle {
         .await?
     }
 
-    /// Restarts a task with a fresh restart budget and returns once the new
-    /// run is [`Running`](TaskStatus::Running).
+    /// Restarts a task with an empty restart history and returns once the
+    /// new run is [`Running`](TaskStatus::Running).
     ///
     /// A running task is cancelled first and has `stop_timeout` to exit.
+    /// Returns [`Closed`](SupervisorHandleError::Closed) if the supervisor
+    /// shuts down before the new run starts.
     pub async fn restart_task(&self, name: &str) -> Result<(), SupervisorHandleError> {
         self.request(|reply| Message::RestartTask {
             name: name.to_owned(),
